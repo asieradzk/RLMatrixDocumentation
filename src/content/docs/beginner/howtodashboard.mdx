@@ -1,0 +1,131 @@
+---
+title: How to Use Dashboard
+description: Learn how to use the RLMatrix Dashboard to monitor your training progress in real-time.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+
+Continuing from our [Getting Started](/beginner/gettingstarted/) guide, you might be wondering how to monitor your AI's training progress. While printing to the console works for simple examples, real-world projects often require more sophisticated monitoring.
+
+The RLMatrix Dashboard provides real-time visualization of training metrics, helping you determine if your AI is learning effectively, has finished training, or is failing to make progress.
+
+## Setting Up the Dashboard
+
+:::caution[Prerequisites]
+Make sure you have the .NET Web SDK installed on your system (`Microsoft.NET.Sdk.Web`). This is required to run the dashboard application.
+:::
+
+### Option 1: Clone the Full Repository
+
+If you want the full RLMatrix source code:
+
+```bash title="Clone the full RLMatrix repository"
+git clone https://github.com/asieradzk/RL_Matrix.git
+```
+
+### Option 2: Get Just the Dashboard
+
+If you only need the dashboard component:
+
+```bash title="Clone just the dashboard using Git sparse-checkout"
+git clone --filter=blob:none --sparse https://github.com/asieradzk/RL_Matrix.git
+cd RL_Matrix
+git sparse-checkout set src/RLMatrix.Dashboard
+```
+
+## Running the Dashboard
+
+Once you have the dashboard code, you can:
+
+1. Open the project in your preferred editor (like Visual Studio or VS Code)
+2. Build and run the project
+
+Alternatively, you can build the binary and run that directly.
+
+Since this is a Blazor Server application, you'll see a console window with output similar to:
+
+```bash title="Dashboard Console Output"
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: https://localhost:7126
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: http://localhost:5069
+info: Microsoft.Hosting.Lifetime[0]
+Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+Content root path: D:\path\to\your\dashboard\RLMatrix.Dashboard
+```
+
+If a browser window doesn't open automatically, navigate to [https://localhost:7126](https://localhost:7126) in your browser.
+
+:::tip
+When you first open the dashboard, the experiment dropdown in the top-left corner will be empty. This is normal - it will populate once training starts.
+:::
+
+## Connecting Your Project to the Dashboard
+
+Let's revisit our pattern matching example from the [Getting Started](/beginner/gettingstarted/) guide. When you run your training code, you should see a message in the console:
+
+```
+Connected to dashboard
+```
+
+If you don't see this message, something went wrong with the connection. Double-check that:
+1. The dashboard is running
+2. Your training code has the correct connection settings
+3. No firewall is blocking the connection
+
+## Interpreting Dashboard Data
+
+After starting your training, refresh the dashboard page. You should now see your experiment name in the top-left dropdown menu. Select it to view your training metrics:
+
+![RLMatrix Dashboard](https://i.imgur.com/example-image.png)
+
+The dashboard displays several important metrics:
+
+### Reward Over Time
+This graph shows the reward received per episode. For our pattern matching example, you should see it award -1 less frequently as the AI learns the correct pattern.
+
+### Cumulative Reward Over Time
+This shows the sum of rewards over time. **The change of slope of this graph is particularly important** - slope becomes steeper as your AI learns to maximize rewards.
+
+:::note[What to Look For]
+A steadily increasing slope in the cumulative reward graph is one of the best indicators that your model is improving.
+Constant slope might mean the model is stuck and needs higher exploration stimulation.
+:::
+
+### Episode Length Over Time
+This tracks how many steps each episode takes. In our simple pattern matching example, this will always be 1 since we take one step per episode. In more complex environments (like Cart-Pole), this metric can reveal if your agent is surviving longer over time.
+
+### Loss Over Time
+This shows the neural network's loss function value. **Look for a generally decreasing trend** - this indicates your model is fitting the data better.
+
+### Learning Rate Over Time
+This displays changes in the neural network's learning rate. By default, RLMatrix uses a scheduler that causes small oscillations during training.
+
+## Real-Time Updates
+
+One of the most powerful features of the dashboard is its real-time updating. As your training progresses, the dashboard will update automatically to reflect the latest metrics.
+
+In our pattern matching example, you can press Enter in your console window to continue training and watch the dashboard update in real-time.
+
+## Exporting Training Data
+
+For further analysis or record-keeping, you can export your training data by clicking the "Export as CSV" button in the top-right corner of the dashboard.
+
+This allows you to:
+- Perform custom analysis in Excel or other tools
+- Compare different training runs
+- Share results with colleagues
+
+## Next Steps
+
+Now that you understand how to monitor your training with the dashboard, you're ready to explore more complex environments and action spaces.
+
+<LinkCard
+    title="Working with Continuous Actions"
+    description="Learn how to train agents with continuous action spaces for more realistic control problems."
+    href="/beginner/continuousactions/"
+/>

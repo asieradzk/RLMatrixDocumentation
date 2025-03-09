@@ -1,0 +1,335 @@
+---
+export interface Option {
+    text: string;
+    correct: boolean;
+    explanation?: string;
+}
+
+export interface Question {
+    question: string;
+    options: Option[];
+    hint?: string;
+}
+
+export interface Props {
+    title?: string;
+    questions: Question[];
+}
+
+const { title = "Knowledge Check", questions } = Astro.props;
+---
+
+<div class="quiz-wrapper not-content">
+    <div class="quiz-header" id="quiz-toggle">
+        <div class="quiz-toggle-content">
+            <svg xmlns="http://www.w3.org/2000/svg" class="chevron-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+            <h3 class="font-bold text-2xl">{title}</h3>
+        </div>
+    </div>
+
+    <div class="quiz-content" id="quiz-content" style="display: none;">
+        {questions.map((q, qIndex) => (
+                <div class="question-container">
+                    <p class="font-medium text-lg question-text">Question {qIndex + 1}: {q.question}</p>
+
+                    <div class="options-container">
+                        {q.options.map((option, oIndex) => (
+                                <div class="option-wrapper" data-correct={option.correct}>
+                                    <label class="option-label">
+                                        <input
+                                                type="checkbox"
+                                                name={`q${qIndex}`}
+                                                value={oIndex}
+                                                class="option-input"
+                                        />
+                                        <span class="option-text">{option.text}</span>
+                                    </label>
+                                    <div class="feedback-container">
+                                        {option.explanation && (
+                                                <div class="feedback">
+                                                    {option.explanation}
+                                                </div>
+                                        )}
+                                    </div>
+                                </div>
+                        ))}
+                    </div>
+
+                    {q.hint && (
+                            <details class="hint-container">
+                                <summary class="hint-summary">Need a hint?</summary>
+                                <div class="hint-content">
+                                    <p>{q.hint}</p>
+                                </div>
+                            </details>
+                    )}
+
+                    <div class="button-container">
+                        <button class="check-answer-btn">
+                            Check Answer
+                        </button>
+                    </div>
+                </div>
+        ))}
+    </div>
+</div>
+
+<script>
+    // Toggle quiz visibility
+    const quizToggle = document.getElementById('quiz-toggle');
+    const quizContent = document.getElementById('quiz-content');
+
+    if (quizToggle && quizContent) {
+        quizToggle.addEventListener('click', () => {
+            const isVisible = quizContent.style.display !== 'none';
+            quizContent.style.display = isVisible ? 'none' : 'block';
+            quizToggle.classList.toggle('open', !isVisible);
+        });
+    }
+
+    // Check answer functionality
+    document.querySelectorAll('.check-answer-btn').forEach((button: Element) => {
+        button.addEventListener('click', (e: Event) => {
+            const container = (e.target as Element).closest('.question-container');
+            if (!container) return;
+
+            container.querySelectorAll('.option-wrapper').forEach((wrapper: Element) => {
+                wrapper.classList.remove('correct', 'incorrect');
+                const feedbackContainer = wrapper.querySelector('.feedback-container');
+                if (feedbackContainer) {
+                    (feedbackContainer as HTMLElement).style.display = 'none';
+                }
+            });
+
+            container.querySelectorAll('.option-wrapper').forEach((wrapper: Element) => {
+                const input = wrapper.querySelector('input') as HTMLInputElement;
+                const feedbackContainer = wrapper.querySelector('.feedback-container') as HTMLElement;
+                const isCorrect = wrapper.getAttribute('data-correct') === 'true';
+
+                if (input && input.checked) {
+                    wrapper.classList.add(isCorrect ? 'correct' : 'incorrect');
+                    if (feedbackContainer) {
+                        feedbackContainer.style.display = 'block';
+                    }
+                }
+            });
+        });
+
+        const questionContainer = button.closest('.question-container');
+        if (questionContainer) {
+            questionContainer.querySelectorAll('input[type="checkbox"]').forEach((checkbox: Element) => {
+                checkbox.addEventListener('change', (e: Event) => {
+                    const target = e.target as HTMLInputElement;
+                    if (target.checked) {
+                        const name = target.name;
+                        questionContainer.querySelectorAll(`input[name="${name}"]`).forEach((other: Element) => {
+                            const otherInput = other as HTMLInputElement;
+                            if (otherInput !== target) otherInput.checked = false;
+                        });
+                    }
+                });
+            });
+        }
+    });
+</script>
+
+<style>
+    /* Quiz Container */
+    .quiz-wrapper {
+        border: 1px solid var(--sl-color-gray-5);
+        border-radius: 0.75rem;
+        margin: 2rem 0;
+        overflow: hidden;
+    }
+
+    /* Header and Toggle */
+    .quiz-header {
+        padding: 1.25rem 1.5rem;
+        cursor: pointer;
+        background-color: rgba(0, 0, 0, 0.05);
+        transition: background-color 0.2s;
+    }
+
+    .quiz-header:hover {
+        background-color: rgba(0, 0, 0, 0.08);
+    }
+
+    /* Dark mode header */
+    :global(.dark) .quiz-header {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    :global(.dark) .quiz-header:hover {
+        background-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .quiz-toggle-content {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .chevron-icon {
+        transform: rotate(0);
+        transition: transform 0.3s ease;
+    }
+
+    .quiz-header.open .chevron-icon {
+        transform: rotate(180deg);
+    }
+
+    /* Quiz Content */
+    .quiz-content {
+        padding: 2rem;
+    }
+
+    /* Question Container */
+    .question-container {
+        margin-bottom: 3rem;
+        padding-bottom: 2rem;
+        border-bottom: 1px solid var(--sl-color-gray-3);
+    }
+
+    .question-container:last-child {
+        margin-bottom: 0;
+        padding-bottom: 0;
+        border-bottom: none;
+    }
+
+    .question-text {
+        margin-bottom: 1.5rem;
+    }
+
+    /* Options */
+    .options-container {
+        margin: 0 0 1.5rem 1rem;
+    }
+
+    .option-wrapper {
+        margin-bottom: 1.25rem;
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        transition: background-color 0.2s;
+    }
+
+    .option-wrapper:hover {
+        background-color: rgba(0, 0, 0, 0.05);
+    }
+
+    :global(.dark) .option-wrapper:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .option-label {
+        cursor: pointer;
+        display: flex;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+
+    .option-input {
+        cursor: pointer;
+        width: 1.5rem;
+        height: 1.5rem;
+        margin-top: 0.25rem;
+    }
+
+    .option-text {
+        line-height: 1.5;
+        font-size: 1.1rem;
+    }
+
+    /* Feedback */
+    .feedback-container {
+        display: none;
+        margin-top: 1rem;
+        margin-left: 2.5rem;
+    }
+
+    .feedback {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        font-size: 1rem;
+        line-height: 1.5;
+    }
+
+    /* Correct/Incorrect Styling */
+    .option-wrapper.correct {
+        background-color: var(--sl-color-green-low);
+    }
+
+    .option-wrapper.incorrect {
+        background-color: var(--sl-color-red-low);
+    }
+
+    .option-wrapper.correct .option-label {
+        color: var(--sl-color-green-high);
+        font-weight: 600;
+    }
+
+    .option-wrapper.incorrect .option-label {
+        color: var(--sl-color-red-high);
+        font-weight: 600;
+    }
+
+    .option-wrapper.correct .feedback {
+        background-color: rgba(var(--sl-color-green-rgb), 0.15);
+        color: var(--sl-color-green-high);
+        border-left: 3px solid var(--sl-color-green-high);
+    }
+
+    .option-wrapper.incorrect .feedback {
+        background-color: rgba(var(--sl-color-red-rgb), 0.15);
+        color: var(--sl-color-red-high);
+        border-left: 3px solid var(--sl-color-red-high);
+    }
+
+    /* Hint */
+    .hint-container {
+        margin: 1.5rem 0 2rem 1rem;
+    }
+
+    .hint-summary {
+        cursor: pointer;
+        color: var(--sl-color-text-accent);
+        font-weight: 500;
+    }
+
+    .hint-content {
+        margin-top: 0.75rem;
+        padding: 1rem;
+        background-color: rgba(0, 0, 0, 0.05);
+        border-radius: 0.5rem;
+    }
+
+    :global(.dark) .hint-content {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Button */
+    .button-container {
+        display: flex;
+        justify-content: flex-start;
+        margin-top: 1.5rem;
+    }
+
+    .check-answer-btn {
+        padding: 0.75rem 1.5rem;
+        font-size: 1rem;
+        font-weight: 500;
+        background-color: var(--sl-color-accent);
+        color: white;
+        border: none;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+    .check-answer-btn:hover {
+        background-color: var(--sl-color-accent-high);
+    }
+
+    /* Dark mode adjustments */
+</style>

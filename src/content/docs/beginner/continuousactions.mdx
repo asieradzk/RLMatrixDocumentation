@@ -1,0 +1,423 @@
+---
+title: Working with Continuous Actions
+description: Introduction to continuous actions in RLMatrix and reinforcement learning.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+import Quiz from '@/components/Quiz.astro';
+
+Let's start with the project from our [previous tutorial](/beginner/gettingstarted/) and add continuous actions to it. You can either follow along using the [starter project](https://github.com/asieradzk/RLMatrixGettingStartedExample1) or check out the [complete project](https://github.com/asieradzk/RLMatrixGettingStartedExample2_ContinuousActions) if you prefer.
+
+## Discrete vs. Continuous Actions
+
+In the previous guide, we worked with discrete actions - our agent had to choose between a finite set of options (0 or 1) to match a pattern. In real scenarios, we might receive a multitude of sensor data and visual inputs to decide which button to press.
+
+:::tip[Future-Proof Your Projects]
+If you can DISCRETIZE your action spaces so that decisions can be simplified to a finite number of button presses (discrete actions), do it! This makes the learning signals much more visible and drastically accelerates training, as we'll witness firsthand in this tutorial.
+:::
+
+However, in many real-world applications, this isn't always possible. For controlling things like:
+- Steering angles in vehicles
+- Joint torques in robotic arms
+- Power levels in engines
+
+Our agent will need to output continuous actions—precise floating-point values rather than categorical choices.
+
+## Adding Continuous Actions to Our Environment
+
+Let's modify our environment to include both discrete and continuous actions. We'll keep our original pattern matching task but add a second pattern where we expect the AI to output the square root of this new value.
+
+Notice how we change nothing except our EXPECTATIONS—the agent will need to figure out what we want through trial and error, guided only by reward signals!
+
+First, add new fields to track the second pattern and continuous action in `PatternMatchingEnvironment.cs`:
+
+```csharp title="PatternMatchingEnvironment.cs" ins="private int pattern2 = 0;" ins="private float aicontinuousChoice = 0f;"
+private int pattern = 0;
+private int pattern2 = 0;
+private int aiChoice = 0;
+private float aicontinuousChoice = 0f;
+private bool roundFinished = false;
+```
+
+Next, add a second observation method and our continuous action method:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixObservation]
+public float SeePattern() => pattern;
+
+[RLMatrixObservation]
+public float SeePattern2() => pattern2;
+
+[RLMatrixActionContinuous]
+public void MakeChoiceContinuous(float input)
+{
+    aicontinuousChoice = input;
+}
+```
+
+Now, let's create our reward functions:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float GiveReward() => aiChoice == pattern ? 1.0f : -1.0f;
+
+// Add +2 reward when the AI's continuous output is close to the square root
+// of the second pattern
+[RLMatrixReward]
+public float ExtraRewards() => Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2)) < 0.1f ? 2f : 0.0f;
+```
+
+Finally, we need to update our `StartNewRound` method to generate both patterns:
+
+```csharp title="PatternMatchingEnvironment.cs" ins="pattern2 = Random.Shared.Next(10);"
+[RLMatrixReset]
+public void StartNewRound()
+{
+    pattern = Random.Shared.Next(2);
+    pattern2 = Random.Shared.Next(10);
+    aiChoice = 0;
+    roundFinished = false;
+}
+```
+
+Notice we're using a range of 0-9 for pattern2, which gives our agent a more interesting challenge of predicting different square roots.
+
+## Fixing Compilation Errors
+
+When you try to build the solution, you'll encounter a series of errors. This is actually helpful—RLMatrix uses strong typing to prevent runtime errors and guide you toward the correct implementation for continuous actions.
+
+### Error 1: Environment Type Mismatch
+
+```
+Argument 1: cannot convert from 'PatternMatchingExample.PatternMatchingEnvironment' to 'RLMatrix.IEnvironmentAsync<float[]>'
+```
+
+This occurs because RLMatrix has different interfaces for continuous and discrete environments to ensure type safety. Let's update our code in `Program.cs`:
+
+```diff lang="csharp" title="Program.cs - Environment Type"
+-var env = new List<IEnvironmentAsync<float[]>> {
++var env = new List<IContinuousEnvironmentAsync<float[]>> {
+    environment,
+    //new PatternMatchingEnvironment().RLInit() //you can add more than one to train in parallel
+};
+```
+
+### Error 2: Agent Type Mismatch
+
+After this change, we'll get a second error:
+
+```
+Argument 2: cannot convert from 'System.Collections.Generic.List<RLMatrix.IContinuousEnvironmentAsync<float[]>>' to 'System.Collections.Generic.IEnumerable<RLMatrix.IEnvironmentAsync<float[]>>'
+```
+
+This is because we're trying to use a discrete agent with a continuous environment. We need to change the agent type:
+
+```diff lang="csharp" title="Program.cs - Agent Type"
+-var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
++var agent = new LocalContinuousRolloutAgent<float[]>(learningSetup, env);
+```
+
+### Error 3: Algorithm Options Mismatch
+
+This leads to our third error:
+
+```
+Argument 1: cannot convert from 'RLMatrix.DQNAgentOptions' to 'RLMatrix.PPOAgentOptions'
+```
+
+This final error shows that DQN is incompatible with continuous actions. We need to switch to PPO (Proximal Policy Optimization), which can handle both discrete and continuous action spaces:
+
+```diff lang="csharp" title="Program.cs - Algorithm Options"
+-var learningSetup = new DQNAgentOptions(
+-    batchSize: 32,      
+-    memorySize: 1000,   
+-    gamma: 0.99f,      
+-    epsStart: 1f,     
+-    epsEnd: 0.05f,      
+-    epsDecay: 150f      
+-);
++var learningSetup = new PPOAgentOptions(
++    batchSize: 128,
++    memorySize: 1000,
++    gamma: 0.99f,
++    width: 128,
++    lr: 1E-03f
++);
+```
+
+:::note[DQN vs PPO]
+DQN is designed specifically for discrete action spaces and has no mechanism for handling continuous outputs. PPO, on the other hand, is an actor-critic algorithm that can handle discrete actions, continuous actions, or both simultaneously.
+
+Each algorithm has its strengths—DQN can be very sample-efficient for discrete problems, while PPO often handles complex environments more robustly. RLMatrix provides both, so you can choose based on your specific needs.
+:::
+
+
+
+## Our First Training Run
+
+Now let's run the training and see what happens:
+
+```bash title="Training Output"
+Step 800/1000 - Last 50 steps accuracy: 42.0%
+Press Enter to continue...
+
+Step 850/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 37.0%
+Press Enter to continue...
+```
+
+Surprise! The AI is hardly learning at all. The accuracy doesn't get over 50%, and if we inspect the dashboard, we see it's regularly collecting +1 rewards for discrete actions (matching pattern) but rarely getting the +2 rewards for continuous actions (predicting √pattern2).
+
+## Why Is This Happening?
+
+Ask yourself: Why does the AI learn to match the discrete action so much easier than the continuous one?
+
+Your first instinct might be the learning rate (`lr`)—maybe it's too low? Let's try changing it to `1E-02f` and running the training again...
+
+Did that help? Probably not. In fact, you might notice that while the agent learns the discrete action faster, it hardly explores the continuous action space at all, and the accuracy gets even worse as training progresses.
+
+So what's really going on?
+
+:::caution[The Fundamental Challenge]
+The likelihood of the AI hitting the continuous action exactly right through random exploration is vanishingly small.
+
+Think about it:
+- With discrete choices (0 or 1), random guessing gives a 50% chance of being correct
+- With continuous values, what are the odds of randomly outputting:
+- √0 = 0 when pattern2 = 0
+- √1 = 1 when pattern2 = 1
+- √2 ≈ 1.414 when pattern2 = 2
+- √3 ≈ 1.732 when pattern2 = 3
+- ...and so on up to √9 = 3
+
+This creates a sparse reward problem—the agent rarely stumbles upon the correct action by chance, so it receives little useful feedback to learn from.
+:::
+
+## Adding a Guiding Signal
+
+Let's try to remedy this by providing a more helpful reward signal. We'll add a reward that increases as the agent gets closer to the correct square root, rather than only rewarding exact matches:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float ExtraSupportingReward() => 0.5f / (1 + Math.Abs(aicontinuousChoice - (float)Math.Sqrt(pattern2)));
+
+//Dont forget to set your lr back to 1E-03f!
+```
+
+This reward function creates a gradient—a continuous signal that gets stronger as the agent approaches the correct value. Even when it's not exactly right, it gets feedback about whether it's getting "warmer" or "colder."
+
+:::tip[Reward Engineering]
+This illustrates a critical principle in reinforcement learning called **reward shaping**:
+
+- **Sparse rewards** (all-or-nothing) make learning nearly impossible in continuous spaces
+- **Dense/shaped rewards** create a gradient that guides the learning process
+- Even a small signal about "getting warmer" can make the difference between learning in hours vs. never learning at all
+
+Think of it like helping a blindfolded person find their way across a room:
+- Sparse reward: "You've reached the door" (but silence otherwise)
+- Shaped reward: "Warmer... warmer... colder... warmer again..."
+
+The second approach leads to success much more reliably. This is especially crucial for continuous control problems where the agent needs to discover precise values.
+:::
+
+Let's run the training again with this change and see what happens:
+
+```bash title="Training Output"
+Step 850/1000 - Last 50 steps accuracy: 35.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 47.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 36.0%
+Press Enter to continue...
+```
+
+We're seeing some small improvements, but it's still not great. The dashboard might show hints that learning is progressing, but clearly, we need more training time for this more complex task.
+
+## Extending Training Time
+
+For more complex challenges like continuous action prediction, we often need more training steps. Let's modify our program to train for 10,000 steps instead of 1,000:
+
+```csharp title="Program.cs" {1,5}
+for (int i = 0; i < 10000; i++)
+{
+    await agent.Step();
+
+    if ((i + 1) % 500 == 0)
+    {
+        Console.WriteLine($"Step {i + 1}/10000 - Last 500 steps accuracy: {environment.RecentAccuracy:F1}%");
+        environment.ResetStats();
+        
+        Console.WriteLine("\nPress Enter to continue...");
+        Console.ReadLine();
+    }
+}
+```
+
+## Experiment: Learning Rate Impact
+
+As you watch the longer training progress, try experimenting with different learning rates. What happens if you lower it even further? What if you raise it significantly?
+
+In my experiments, setting a very high learning rate causes the model to get stuck collecting only the +1 rewards for discrete actions while completely failing to explore the continuous space adequately.
+
+:::tip[Learning Rate Insights]
+With PPO especially, increasing the learning rate isn't always better for exploration:
+
+- **Too high**: The agent quickly fixates on whatever strategies it found first, often ignoring the harder-to-discover continuous action patterns
+- **Too low**: Learning happens painfully slowly, but explores more thoroughly
+- **Just right**: Balances exploration and exploitation appropriately for your task
+
+This counterintuitive relationship between learning rate and exploration quality is particularly important when working with continuous action spaces.
+:::
+
+## Key Takeaways
+
+Through this exercise, we've learned several important lessons:
+
+1. **Continuous actions are inherently harder to learn** than discrete ones, due to the sparse reward problem. When possible, discretize your action space!
+
+2. **Reward engineering matters enormously** for continuous control problems. Providing signal about "getting warmer" transforms an impossible learning task into a tractable one.
+
+3. **Complex tasks require more training time**. As we add dimensions to our action space, we need to scale training duration accordingly.
+
+4. **Algorithm selection is critical**. DQN can't handle continuous actions at all, while PPO can handle discrete, continuous, or mixed action spaces.
+
+5. **Learning rate tuning is delicate**, especially with PPO. Higher isn't always better and can sometimes be worse for exploration.
+
+These principles will serve you well as you tackle more complex reinforcement learning challenges with RLMatrix.
+
+## Test Your Understanding
+
+<Quiz
+    title="Understanding Continuous Actions"
+    questions={[
+        {
+            question: "Why is it so much more difficult for an agent to learn continuous actions compared to discrete actions?",
+            options: [
+                {
+                    text: "Continuous actions require more computational resources due to the complexity of neural network calculations",
+                    correct: false,
+                    explanation: "While continuous action spaces might need more complex neural networks, this isn't the fundamental reason for the learning difficulty. The core challenge is much more fundamental to the exploration-exploitation problem in reinforcement learning."
+                },
+                {
+                    text: "The probability of randomly exploring the correct continuous value is infinitesimal compared to picking from a small set of discrete options",
+                    correct: true,
+                    explanation: "Exactly right! This is the sparse reward problem at work. When randomly exploring, an agent has perhaps a 50% chance of getting a discrete binary choice correct, but finding precisely √2 ≈ 1.414... out of all possible floating point values is virtually impossible through pure chance. This makes initial learning signals extremely rare without proper reward shaping."
+                },
+                {
+                    text: "PPO algorithms are inherently less efficient than DQN algorithms for all types of learning tasks",
+                    correct: false,
+                    explanation: "This isn't accurate. PPO and DQN have different strengths - DQN can be more sample-efficient for discrete problems, while PPO is more versatile and can handle continuous action spaces which DQN fundamentally cannot. Neither is universally better than the other."
+                }
+            ],
+            hint: "Think about what happens when an agent is exploring randomly at the beginning of training. What are the odds of it finding the correct action in each case?"
+        },
+        {
+            question: "What key technique transformed our continuous action learning problem from nearly impossible to tractable?",
+            options: [
+                {
+                    text: "Increasing the number of training steps from 1,000 to 10,000",
+                    correct: false,
+                    explanation: "While more training time is important, it alone wouldn't solve the fundamental sparse reward problem. Our agent would still struggle to learn without the more important change we made."
+                },
+                {
+                    text: "Changing from DQN to PPO algorithm",
+                    correct: false,
+                    explanation: "This change was necessary (since DQN can't handle continuous actions at all), but it wasn't sufficient. Even with PPO, our agent struggled initially with the sparse reward signal."
+                },
+                {
+                    text: "Adding a shaped reward function that provides feedback based on how close the agent is to the correct value",
+                    correct: true,
+                    explanation: "Exactly! This is reward shaping in action. By adding the ExtraSupportingReward function that returns 0.5f / (1 + Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2))), we created a gradient that provides useful learning signals even when the agent isn't exactly right. This is like giving 'warmer/colder' feedback rather than just silence until finding the exact target."
+                }
+            ],
+            hint: "Consider which change addressed the fundamental challenge of sparse rewards in continuous action spaces."
+        },
+        {
+            question: "What counterintuitive relationship did we observe regarding learning rate in PPO for continuous action tasks?",
+            options: [
+                {
+                    text: "Higher learning rates caused the agent to focus only on easier discrete rewards while neglecting continuous actions",
+                    correct: true,
+                    explanation: "That's right! We observed that with very high learning rates, the agent would quickly learn the discrete action pattern (+1 reward) and then fixate on that, effectively ignoring the continuous action space that provides the +2 reward but is harder to discover. This demonstrates how learning rate affects exploration/exploitation balance."
+                },
+                {
+                    text: "Lower learning rates always resulted in faster convergence to optimal policies",
+                    correct: false,
+                    explanation: "This is the opposite of what we observed. Lower learning rates actually led to slower learning overall but sometimes better exploration of the continuous action space. There's a delicate balance to strike."
+                },
+                {
+                    text: "Learning rate had no meaningful impact on the training outcome",
+                    correct: false,
+                    explanation: "Learning rate had a significant impact on training outcomes. It affected both the speed of learning and, more importantly, the exploration-exploitation balance, especially with respect to how the agent prioritized the easier discrete rewards versus the harder-to-discover continuous action patterns."
+                }
+            ],
+            hint: "Recall what happened when we experimented with different learning rates and how it affected the agent's ability to discover both types of rewards."
+        },
+        {
+            question: "If you were designing a robotic control system that needs to determine both WHICH button to press (out of 4 buttons) AND how much pressure to apply (0-100%), what approach would be most effective based on this lesson?",
+            options: [
+                {
+                    text: "Use DQN for its efficiency, and discretize the pressure into 10 levels (0%, 10%, 20%, etc.)",
+                    correct: true,
+                    explanation: "Excellent choice! This follows the key principle from the tutorial: 'If you can DISCRETIZE your action spaces, do it!' By converting pressure into 10 discrete levels, we've transformed a difficult continuous problem into a manageable discrete one with just 40 total actions (4 buttons × 10 pressure levels). DQN will learn this discretized space much more efficiently than struggling with continuous values."
+                },
+                {
+                    text: "Use PPO with its default settings and let it figure out both aspects simultaneously",
+                    correct: false,
+                    explanation: "While PPO can handle mixed action spaces, just using it with default settings would likely lead to suboptimal learning. The lesson showed us that continuous actions are inherently difficult to learn through random exploration. Without discretization or careful reward shaping, learning would be inefficient."
+                },
+                {
+                    text: "Use PPO with shaped rewards that provide gradient feedback on pressure accuracy, and treat pressure as a true continuous value",
+                    correct: false,
+                    explanation: "While this approach could eventually work, it ignores the tutorial's key insight that discretizing actions when possible leads to faster, more reliable learning. Treating pressure as a continuous value creates an unnecessarily difficult learning problem when discretization into 10 levels would likely be sufficient for the task."
+                }
+            ],
+            hint: "Remember the tutorial's strong recommendation about discretizing action spaces when possible, and consider which approach simplifies the learning problem the most."
+        },
+        {
+            question: "Based on the patterns we've seen, which scenario would likely be MOST challenging for a reinforcement learning agent?",
+            options: [
+                {
+                    text: "Learning to choose one of three predefined routes through a maze",
+                    correct: false,
+                    explanation: "This is a straightforward discrete action problem with just three options. Based on our lesson, discrete action spaces with few options are the easiest for reinforcement learning agents to explore effectively."
+                },
+                {
+                    text: "Learning to adjust the temperature of a system to precisely 37.85°C with minimal fluctuation",
+                    correct: true,
+                    explanation: "This is indeed the most challenging scenario! It involves finding an extremely precise continuous value (37.85°C exactly) and maintaining it with minimal deviation. Without properly shaped rewards, the agent would struggle to discover this precise setpoint through random exploration, making it precisely the kind of sparse reward problem we discussed."
+                },
+                {
+                    text: "Learning to recognize and sort 10 different types of objects based on visual input",
+                    correct: false,
+                    explanation: "While this involves more discrete options (10 categories), it's still fundamentally a discrete classification problem. The agent receives clear feedback on whether it classified correctly or not, avoiding the sparse reward challenge of continuous action spaces."
+                }
+            ],
+            hint: "Think about which scenario involves finding a needle in a haystack in terms of the action space exploration."
+        }
+    ]}
+/>
+
+## Next Steps
+
+Now that you understand the challenges of continuous action spaces and how to address them, you're ready to try a classic reinforcement learning problem with more complex observations.
+
+<LinkCard
+    title="Cart-Pole Example"
+    description="Learn how to balance a pole on a moving cart using reinforcement learning."
+    href="/beginner/cartpole/"
+/>
+
