@@ -37,6 +37,12 @@ export default defineConfig({
 					label: 'Reference',
 					autogenerate: { directory: 'reference' },
 				},
+				{
+					label: 'Other',
+					items: [
+						{label: 'TorchSharp in Unity', slug: 'other/torchsharpunity'},
+					]
+				}
 			],
 		}),
 	],
