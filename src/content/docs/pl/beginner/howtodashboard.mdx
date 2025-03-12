@@ -1,0 +1,131 @@
+---
+title: Jak korzystać z panelu kontrolnego
+description: Dowiedz się, jak korzystać z panelu kontrolnego RLMatrix do monitorowania postępów uczenia w czasie rzeczywistym.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+
+Kontynuując nasz przewodnik [Pierwsze kroki](/beginner/gettingstarted/), możesz zastanawiać się, jak monitorować postępy uczenia Twojej AI. Podczas gdy wyświetlanie informacji w konsoli działa w prostych przykładach, projekty w rzeczywistych warunkach często wymagają bardziej zaawansowanego monitorowania.
+
+Panel kontrolny RLMatrix zapewnia wizualizację metryk uczenia w czasie rzeczywistym, pomagając określić, czy Twoja AI uczy się efektywnie, zakończyła naukę, czy też nie robi postępów.
+
+## Konfiguracja panelu kontrolnego
+
+:::caution[Wymagania wstępne]
+Upewnij się, że masz zainstalowany pakiet .NET Web SDK na swoim systemie (`Microsoft.NET.Sdk.Web`). Jest to wymagane do uruchomienia aplikacji panelu kontrolnego.
+:::
+
+### Opcja 1: Klonowanie pełnego repozytorium
+
+Jeśli chcesz pobrać pełny kod źródłowy RLMatrix:
+
+```bash title="Klonowanie pełnego repozytorium RLMatrix"
+git clone https://github.com/asieradzk/RL_Matrix.git
+```
+
+### Opcja 2: Pobranie tylko panelu kontrolnego
+
+Jeśli potrzebujesz tylko komponentu panelu kontrolnego:
+
+```bash title="Klonowanie tylko panelu kontrolnego za pomocą Git sparse-checkout"
+git clone --filter=blob:none --sparse https://github.com/asieradzk/RL_Matrix.git
+cd RL_Matrix
+git sparse-checkout set src/RLMatrix.Dashboard
+```
+
+## Uruchamianie panelu kontrolnego
+
+Po pobraniu kodu panelu kontrolnego, możesz:
+
+1. Otworzyć projekt w preferowanym edytorze (np. Visual Studio lub VS Code)
+2. Zbudować i uruchomić projekt
+
+Alternatywnie, możesz zbudować plik binarny i uruchomić go bezpośrednio.
+
+Ponieważ jest to aplikacja Blazor Server, zobaczysz okno konsoli z wynikiem podobnym do:
+
+```bash title="Wynik konsoli panelu kontrolnego"
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: https://localhost:7126
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: http://localhost:5069
+info: Microsoft.Hosting.Lifetime[0]
+Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+Content root path: D:\path\to\your\dashboard\RLMatrix.Dashboard
+```
+
+Jeśli okno przeglądarki nie otworzy się automatycznie, przejdź do [https://localhost:7126](https://localhost:7126) w swojej przeglądarce.
+
+:::tip
+Gdy pierwszy raz otworzysz panel kontrolny, rozwijana lista eksperymentów w lewym górnym rogu będzie pusta. To normalne - wypełni się po rozpoczęciu uczenia.
+:::
+
+## Łączenie projektu z panelem kontrolnym
+
+Powróćmy do naszego przykładu dopasowywania wzorców z przewodnika [Pierwsze kroki](/beginner/gettingstarted/). Po uruchomieniu kodu uczącego, powinieneś zobaczyć wiadomość w konsoli:
+
+```
+Połączono z panelem kontrolnym
+```
+
+Jeśli nie widzisz tej wiadomości, coś poszło nie tak z połączeniem. Sprawdź, czy:
+1. Panel kontrolny jest uruchomiony
+2. Twój kod uczący ma prawidłowe ustawienia połączenia
+3. Żaden firewall nie blokuje połączenia
+
+## Interpretacja danych panelu kontrolnego
+
+Po rozpoczęciu uczenia, odśwież stronę panelu kontrolnego. Powinieneś teraz zobaczyć nazwę swojego eksperymentu w rozwijanej liście w lewym górnym rogu. Wybierz ją, aby zobaczyć swoje metryki uczenia:
+
+![Panel kontrolny RLMatrix](/images/dashboard/dashboard.png)
+
+Panel kontrolny wyświetla kilka ważnych metryk:
+
+### Nagroda w czasie
+Ten wykres pokazuje nagrodę otrzymaną w każdym epizodzie. Dla naszego przykładu dopasowywania wzorców, powinieneś zauważyć coraz rzadsze przyznawanie wartości -1 w miarę jak AI uczy się poprawnego wzorca.
+
+### Skumulowana nagroda w czasie
+Pokazuje sumę nagród w czasie. **Zmiana nachylenia tego wykresu jest szczególnie ważna** - nachylenie staje się bardziej strome, gdy Twoja AI uczy się maksymalizować nagrody.
+
+:::note[Na co zwrócić uwagę]
+Stale rosnące nachylenie wykresu skumulowanej nagrody jest jednym z najlepszych wskaźników, że Twój model się doskonali.
+Stałe nachylenie może oznaczać, że model utknął i potrzebuje większej stymulacji do eksploracji.
+:::
+
+### Długość epizodu w czasie
+Śledzi, ile kroków zajmuje każdy epizod. W naszym prostym przykładzie dopasowywania wzorców, zawsze będzie to 1, ponieważ wykonujemy jeden krok na epizod. W bardziej złożonych środowiskach (jak Cart-Pole), ta metryka może ujawnić, czy Twój agent przeżywa dłużej w miarę upływu czasu.
+
+### Funkcja straty w czasie
+Pokazuje wartość funkcji straty sieci neuronowej. **Szukaj ogólnie malejącego trendu** - to wskazuje, że Twój model lepiej dopasowuje się do danych.
+
+### Współczynnik uczenia w czasie
+Wyświetla zmiany we współczynniku uczenia sieci neuronowej. Domyślnie RLMatrix wykorzystuje scheduler, który powoduje małe oscylacje podczas uczenia.
+
+## Aktualizacje w czasie rzeczywistym
+
+Jedną z najpotężniejszych funkcji panelu kontrolnego są aktualizacje w czasie rzeczywistym. W miarę postępu uczenia, panel kontrolny będzie automatycznie aktualizowany, aby odzwierciedlić najnowsze metryki.
+
+W naszym przykładzie dopasowywania wzorców możesz nacisnąć Enter w oknie konsoli, aby kontynuować uczenie i obserwować aktualizację panelu kontrolnego w czasie rzeczywistym.
+
+## Eksportowanie danych uczenia
+
+Do dalszej analizy lub dokumentacji możesz wyeksportować dane uczenia, klikając przycisk "Eksportuj jako CSV" w prawym górnym rogu panelu kontrolnego.
+
+Pozwala to na:
+- Przeprowadzenie niestandardowej analizy w Excelu lub innych narzędziach
+- Porównanie różnych sesji uczenia
+- Udostępnianie wyników współpracownikom
+
+## Następne kroki
+
+Teraz, gdy już wiesz, jak monitorować swoje uczenie za pomocą panelu kontrolnego, jesteś gotowy do eksploracji bardziej złożonych środowisk i przestrzeni akcji.
+
+<LinkCard
+    title="Praca z akcjami ciągłymi"
+    description="Dowiedz się, jak trenować agentów z ciągłymi przestrzeniami akcji dla bardziej realistycznych problemów sterowania."
+    href="/beginner/continuousactions/"
+/>

@@ -1,0 +1,430 @@
+---
+title: Bắt đầu với RLMatrix
+description: Giới thiệu thân thiện cho người mới bắt đầu về học tăng cường với C#.
+---
+import Quiz from '@/components/Quiz.astro';
+
+:::tip[Đã có kinh nghiệm với RL?]
+Nếu bạn đã quen thuộc với các khái niệm học tăng cường, hãy xem [Hướng dẫn nhanh](../quickstart/setup) của chúng tôi để thiết lập nhanh hơn.
+:::
+
+## Giới thiệu
+
+Khi viết các chương trình truyền thống, chúng ta nói cho máy tính biết chính xác điều cần làm trong mọi tình huống. Ví dụ, nếu chúng ta muốn viết một chương trình so khớp số, chúng ta có thể viết:
+
+```csharp
+if (input == pattern)
+{
+    return "Đúng!";
+}
+else 
+{
+    return "Thử lại!";
+}
+```
+
+Nhưng nếu chúng ta muốn chương trình tự học? Nếu các quy tắc quá phức tạp để viết ra, hoặc chúng ta thậm chí không biết các quy tắc đó? Đây là lúc học tăng cường phát huy tác dụng.
+
+:::note[Học tăng cường là gì?]
+<details>
+    <summary>Một lời giải thích đơn giản</summary>
+
+    Hãy nghĩ về cách bạn học chơi một trò chơi điện tử mới:
+    1. Bạn thử một số nút điều khiển để xem điều gì xảy ra
+    2. Bạn xem cách trò chơi phản ứng
+    3. Bạn nhận điểm hoặc mất mạng
+    4. Theo thời gian, bạn học được điều gì hiệu quả nhất
+
+    Học tăng cường theo cùng một mô hình:
+    1. AI (chúng ta gọi nó là "agent") thử các hành động khác nhau
+    2. Nó thấy điều gì xảy ra trong môi trường của nó
+    3. Nó nhận phần thưởng hoặc hình phạt
+    4. Theo thời gian, nó học được hành động nào hiệu quả nhất
+
+    Không ai nói cho AI biết chính xác điều cần làm - nó tự tìm ra thông qua thử và sai.
+</details>
+:::
+
+## Thiết lập dự án của bạn
+Bạn có thể làm theo hoặc sao chép [kho GitHub này](https:/www.github.com/RLMatrix/RLMatrix-Example).
+Đầu tiên, hãy cài đặt mọi thứ:
+
+```bash title="Cài đặt RLMatrix qua NuGet"
+dotnet add package RLMatrix
+dotnet add package RLMatrix.Toolkit
+```
+
+:::caution[Yêu cầu phần cứng]
+RLMatrix chỉ được thử nghiệm trên PC Windows với GPU NVIDIA. Tuy nhiên, điều này không phải bắt buộc và đối với nhiều trường hợp sử dụng, việc huấn luyện và suy luận trên CPU sẽ đủ hoặc thậm chí nhanh hơn.
+
+Nếu bạn không có card đồ họa tương thích, bạn có thể:
+1. Lấy mã nguồn từ [kho RLMatrix](https://github.com/asieradzk/RL_Matrix)
+2. Thay đổi nó để sử dụng CPU thay thế (tìm kiếm `TorchSharp-cuda-windows` trong RLMatrix.csproj)
+3. Tự xây dựng
+:::
+
+## Môi trường học tập đầu tiên của bạn
+
+Hãy tạo một thứ đơn giản nhưng có ý nghĩa - một môi trường nơi AI của chúng ta sẽ học cách khớp mẫu. Mặc dù điều này có vẻ cơ bản (và sẽ rất đơn giản nếu lập trình trực tiếp), nhưng nó giới thiệu tất cả các khái niệm chính mà chúng ta cần.
+
+:::note[Các khối xây dựng]
+<details>
+    <summary>Giải thích các thuật ngữ chính</summary>
+
+    Trước khi đi sâu vào chi tiết, hãy hiểu một số thuật ngữ quan trọng:
+
+    - **Môi trường**: Thế giới mà AI của chúng ta sống trong đó. Giống như bàn cờ hoặc mô phỏng.
+
+    - **Trạng thái/Quan sát**: Những gì AI của chúng ta có thể thấy hoặc biết về môi trường của nó.
+    Ví dụ: Mẫu hiện tại mà nó cần khớp.
+
+    - **Hành động**: Điều mà AI của chúng ta có thể làm.
+    Ví dụ: Chọn một số.
+
+    - **Phần thưởng**: Phản hồi cho AI biết nó đang hoạt động tốt như thế nào.
+    Ví dụ: +1 cho trận đấu đúng, -1 cho trận đấu sai.
+
+    - **Tập**: Một nỗ lực hoàn chỉnh cho nhiệm vụ.
+    Hãy nghĩ về nó như một vòng trò chơi.
+
+</details>
+:::
+
+Đây là môi trường hoàn chỉnh của chúng ta:
+
+```csharp title="PatternMatchingEnvironment.cs"
+using RLMatrix.Toolkit;
+
+namespace PatternMatchingExample;
+
+[RLMatrixEnvironment]
+public partial class PatternMatchingEnvironment
+{
+    private int pattern = 0;
+    private int aiChoice = 0;
+    private bool roundFinished = false;
+
+    // Bộ đếm đơn giản cho 50 bước cuối cùng
+    private int correct = 0;
+    private int total = 0;
+
+    // Tính toán độ chính xác đơn giản
+    public float RecentAccuracy => total > 0 ? (float)correct / total * 100 : 0;
+
+    [RLMatrixObservation]
+    public float SeePattern() => pattern;
+
+    [RLMatrixActionDiscrete(2)]
+    public void MakeChoice(int choice)
+    {
+        aiChoice = choice;
+        roundFinished = true;
+
+        // Cập nhật bộ đếm
+        total++;
+        if (aiChoice == pattern) correct++;
+    }
+
+    [RLMatrixReward]
+    public float GiveReward() => aiChoice == pattern ? 1.0f : -1.0f;
+
+    [RLMatrixDone]
+    public bool IsRoundOver() => roundFinished;
+
+    [RLMatrixReset]
+    public void StartNewRound()
+    {
+        pattern = Random.Shared.Next(2);
+        aiChoice = 0;
+        roundFinished = false;
+    }
+
+    public void ResetStats()
+    {
+        correct = 0;
+        total = 0;
+    }
+}
+```
+
+:::note[Hiểu mã]
+<details>
+    <summary>Phân tích mã</summary>
+
+    Hãy xem từng phần:
+
+    **Biến:**
+    ```csharp
+    private int pattern = 0;      // Số cần khớp
+    private int aiChoice = 0;     // Dự đoán của AI
+    private bool roundFinished = false;  // Trạng thái vòng
+    ```
+    Những biến này theo dõi những gì đang xảy ra trong môi trường của chúng ta.
+
+    **Thuộc tính đặc biệt:**
+    - `[RLMatrixEnvironment]`: Nói với RLMatrix "đây là môi trường học tập"
+    - `[RLMatrixObservation]`: "Đây là những gì AI có thể thấy"
+    - `[RLMatrixActionDiscrete]`: "Đây là những lựa chọn mà AI có thể thực hiện"
+    - `[RLMatrixReward]`: "Đây là cách chúng ta đánh giá hiệu suất của AI"
+    - `[RLMatrixReset]`: "Đây là cách chúng ta bắt đầu lại"
+
+    Bộ công cụ sử dụng các thuộc tính này để tự động tạo mã cần thiết.
+</details>
+:::
+
+## Huấn luyện AI của bạn
+
+Bây giờ đến phần thú vị - dạy AI của chúng ta cách khớp mẫu. Chúng ta sẽ sử dụng một thuật toán gọi là DQN (Deep Q-Network). Đừng lo lắng quá nhiều về tên - đó chỉ là một cách để dạy AI đưa ra quyết định.
+
+:::note[Tùy chọn huấn luyện]
+<details>
+    <summary>Hiểu cài đặt huấn luyện</summary>
+
+    Chúng ta cần cấu hình cách AI học:
+
+    - `batchSize`: Số lượng kinh nghiệm để học cùng một lúc
+    Hãy nghĩ về nó như việc xem xét nhiều nỗ lực trong quá khứ cùng nhau.
+
+    - `memorySize`: Bao nhiêu kinh nghiệm trong quá khứ để nhớ
+    Giống như việc giữ một cuốn sổ tay ghi lại những gì đã hoạt động và những gì không.
+
+    - `gamma`: Mức độ quan tâm đến phần thưởng trong tương lai
+    Giá trị cao hơn (gần với 1) làm cho AI suy nghĩ dài hạn.
+
+    - `epsStart` và `epsEnd`: Mức độ khám phá so với sử dụng những gì đã biết
+    Giống như thử các chiến lược mới so với gắn bó với những gì hiệu quả.
+
+    Để biết giải thích chi tiết về tất cả các tham số và hiệu ứng của chúng, xem [Hướng dẫn tham chiếu tham số](../../reference/hyperparameters) của chúng tôi.
+</details>
+:::
+
+Đây là cách chúng ta thiết lập huấn luyện:
+
+```csharp title="Program.cs"
+using RLMatrix.Agents.Common;
+using RLMatrix;
+using PatternMatchingExample;
+
+Console.WriteLine("Bắt đầu huấn luyện khớp mẫu...\n");
+
+// Thiết lập cách AI sẽ học
+var learningSetup = new DQNAgentOptions(
+    batchSize: 32,      // Học từ 32 kinh nghiệm cùng một lúc
+    memorySize: 1000,   // Nhớ 1000 lần thử cuối cùng
+    gamma: 0.99f,       // Quan tâm nhiều đến phần thưởng tương lai
+    epsStart: 1f,       // Bắt đầu bằng cách thử mọi thứ
+    epsEnd: 0.05f,      // Cuối cùng gắn bó với những gì hoạt động
+    epsDecay: 150f      // Tốc độ chuyển đổi nhanh như thế nào
+);
+
+// Tạo môi trường của chúng ta
+var environment = new PatternMatchingEnvironment().RLInit();
+var env = new List<IEnvironmentAsync<float[]>> { 
+    environment,
+    //new PatternMatchingEnvironment().RLInit() //bạn có thể thêm nhiều hơn để huấn luyện song song
+};
+
+// Tạo agent học tập
+var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
+
+// Để nó học!
+for (int i = 0; i < 1000; i++)
+{
+    await agent.Step();
+
+    if ((i + 1) % 50 == 0)
+    {
+        Console.WriteLine($"Bước {i + 1}/1000 - Độ chính xác 50 bước cuối: {environment.RecentAccuracy:F1}%");
+        environment.ResetStats();
+        
+        Console.WriteLine("\nNhấn Enter để tiếp tục...");
+        Console.ReadLine();
+    }
+}
+
+Console.WriteLine("\nHuấn luyện hoàn tất!");
+Console.ReadLine();
+```
+
+Khi bạn chạy mã này, bạn sẽ thấy tiến trình huấn luyện được hiển thị mỗi 50 bước:
+
+```bash title="Tiến trình huấn luyện"
+Bắt đầu huấn luyện khớp mẫu...
+
+Bước 50/1000 - Độ chính xác 50 bước cuối: 48.0%
+Nhấn Enter để tiếp tục...
+
+Bước 100/1000 - Độ chính xác 50 bước cuối: 68.0%
+Nhấn Enter để tiếp tục...
+
+Bước 150/1000 - Độ chính xác 50 bước cuối: 86.0%
+Nhấn Enter để tiếp tục...
+
+Bước 200/1000 - Độ chính xác 50 bước cuối: 82.0%
+Nhấn Enter để tiếp tục...
+```
+
+:::tip[Điều cần mong đợi]
+Khi theo dõi tiến trình huấn luyện, bạn sẽ thấy AI cải thiện:
+
+1. Khoảng 50% độ chính xác lúc đầu (đoán ngẫu nhiên)
+2. Độ chính xác tăng đều đặn khi nó học
+3. Cuối cùng đạt độ chính xác 80-90% hoặc cao hơn
+
+Các khoảng dừng mỗi 50 bước cho phép bạn quan sát sự tiến triển này từ đoán ngẫu nhiên đến khớp mẫu thành thạo. Đây là học tăng cường trong hành động!
+:::
+
+## Vượt ra ngoài khớp mẫu đơn giản
+
+Mặc dù ví dụ của chúng ta khá đơn giản, nhưng cùng một nguyên tắc áp dụng cho các vấn đề phức tạp hơn nhiều:
+
+:::note[Ứng dụng thế giới thực]
+<details>
+    <summary>Điều này có thể dẫn đến đâu</summary>
+
+    Cùng cấu trúc cơ bản mà chúng ta đã sử dụng có thể mở rộng cho:
+    - AI chơi game
+    - Điều khiển robot
+    - Quản lý tài nguyên
+    - Tối ưu hóa giao thông
+
+    Sự khác biệt chính là độ phức tạp của trạng thái và hành động, không phải phương pháp cơ bản.
+</details>
+:::
+
+## Kiểm tra sự hiểu biết của bạn
+<Quiz
+    title="Hiểu về Cơ bản của Học tăng cường"
+    questions={[
+        {
+            question: "Tại sao chúng ta chọn học tăng cường thay vì lập trình truyền thống cho một nhiệm vụ?",
+            options: [
+                {
+                    text: "Khi chúng ta cần chương trình hoạt động với độ chính xác cực cao",
+                    correct: false,
+                    explanation: "Thực ra, lập trình truyền thống thường xuất sắc trong độ chính xác khi chúng ta biết chính xác điều mình muốn. Học tăng cường tỏa sáng trong các tình huống mà quy tắc phức tạp hoặc không biết, không nhất thiết khi mục tiêu là độ chính xác tối đa."
+                },
+                {
+                    text: "Khi các quy tắc quá phức tạp để lập trình thủ công hoặc chúng ta không hoàn toàn biết chúng",
+                    correct: true,
+                    explanation: "Chính xác! Học tăng cường đặc biệt có giá trị khi các quy tắc quá phức tạp để xác định (như cân bằng robot) hoặc khi chúng ta không hiểu đầy đủ cách tiếp cận tối ưu. AI có thể khám phá giải pháp thông qua kinh nghiệm thay vì được lập trình rõ ràng."
+                },
+                {
+                    text: "Khi chúng ta cần chương trình chạy nhanh hơn mã truyền thống",
+                    correct: false,
+                    explanation: "Học tăng cường không phải về tốc độ thực thi - thực tế, lập trình truyền thống thường chạy nhanh hơn. RL là về việc có các chương trình học từ kinh nghiệm thay vì được mã hóa rõ ràng cho mọi tình huống."
+                }
+            ],
+            hint: "Hãy nghĩ về những hạn chế của lập trình if/else truyền thống so với việc để hệ thống khám phá mẫu thông qua thử và sai."
+        },
+        {
+            question: "Trong ví dụ của chúng ta, tại sao điều quan trọng là đặt epsStart thành 1.0 và epsEnd thành giá trị thấp hơn như 0.05?",
+            options: [
+                {
+                    text: "Điều này đảm bảo agent luôn chọn hành động với phần thưởng cao nhất",
+                    correct: false,
+                    explanation: "Đó không phải là mục đích. Nếu agent luôn chọn điều nó nghĩ là tốt nhất (chỉ khai thác), nó sẽ không bao giờ khám phá các chiến lược tiềm năng tốt hơn mà nó chưa thử."
+                },
+                {
+                    text: "Các cài đặt này kiểm soát tốc độ học của agent theo thời gian",
+                    correct: false,
+                    explanation: "Mặc dù các tham số này thay đổi theo thời gian, chúng không trực tiếp kiểm soát tốc độ học (đó sẽ là tham số 'lr'). Chúng kiểm soát điều gì đó cơ bản khác trong học tăng cường."
+                },
+                {
+                    text: "Điều này tạo ra sự cân bằng giữa khám phá (thử những điều mới) và khai thác (sử dụng những gì hoạt động) thay đổi theo thời gian",
+                    correct: true,
+                    explanation: "Đúng vậy! Đây là sự cân bằng cổ điển giữa khám phá và khai thác. Bằng cách bắt đầu với epsStart: 1f, agent ban đầu thử mọi thứ (khám phá thuần túy). Khi quá trình đào tạo tiến triển, nó dần dần chuyển sang epsEnd: 0.05f, nơi nó chủ yếu sử dụng những gì nó đã học hoạt động tốt nhất (chủ yếu khai thác) trong khi vẫn thỉnh thoảng khám phá."
+                }
+            ],
+            hint: "Hãy xem xét những gì xảy ra vào đầu quá trình huấn luyện so với sau này - hành vi của agent thay đổi như thế nào, và tại sao điều đó quan trọng?"
+        },
+        {
+            question: "Điều gì có thể xảy ra nếu chúng ta thay đổi hàm phần thưởng của mình để chỉ cung cấp +1 cho các trận đấu chính xác nhưng không có hình phạt cho các trận đấu không chính xác?",
+            options: [
+                {
+                    text: "Việc học sẽ nhanh hơn vì agent chỉ nhận được phản hồi tích cực",
+                    correct: false,
+                    explanation: "Không có hình phạt, agent thực sự sẽ học chậm hơn hoặc có thể không học được gì. Chỉ với phần thưởng tích cực, đoán ngẫu nhiên vẫn mang lại phần thưởng 50% thời gian, không tạo động lực để cải thiện hơn cơ hội ngẫu nhiên."
+                },
+                {
+                    text: "Việc học sẽ chậm hơn hoặc thất bại vì agent sẽ không nhận được phản hồi rõ ràng về các hành động không chính xác",
+                    correct: true,
+                    explanation: "Chính xác! Điều này nhấn mạnh tầm quan trọng của các hàm phần thưởng được thiết kế tốt. Không có hình phạt cho các trận đấu không chính xác, agent không nhận được phản hồi phân biệt sai từ đúng khi nó mắc lỗi. Nó có thể kết luận rằng đoán ngẫu nhiên là đủ tốt vì nó vẫn nhận được phần thưởng một nửa thời gian."
+                },
+                {
+                    text: "Agent sẽ học cùng một mẫu nhưng sẽ cần nhiều bộ nhớ hơn để lưu trữ các trải nghiệm",
+                    correct: false,
+                    explanation: "Yêu cầu bộ nhớ không liên quan trực tiếp đến cấu trúc phần thưởng. Vấn đề chính ở đây là chất lượng tín hiệu học tập mà agent nhận được, không phải lượng bộ nhớ mà nó sử dụng."
+                }
+            ],
+            hint: "Hãy nghĩ về điều gì thúc đẩy việc học - có phải chỉ là nhận phần thưởng, hay cũng là tránh hình phạt?"
+        },
+        {
+            question: "Gamma (được đặt thành 0.99f trong ví dụ của chúng ta) đóng vai trò gì trong quá trình học tập?",
+            options: [
+                {
+                    text: "Nó xác định bao nhiêu mẫu mà agent có thể ghi nhớ cùng một lúc",
+                    correct: false,
+                    explanation: "Khả năng ghi nhớ mẫu chủ yếu liên quan đến kiến trúc mạng nơ-ron, không phải tham số gamma. Gamma phục vụ một mục đích khác trong cách agent đánh giá phần thưởng."
+                },
+                {
+                    text: "Nó kiểm soát mức độ agent đánh giá phần thưởng ngay lập tức so với phần thưởng tiềm năng trong tương lai",
+                    correct: true,
+                    explanation: "Đúng! Gamma là hệ số chiết khấu xác định cách agent đánh giá phần thưởng tương lai so với phần thưởng ngay lập tức. Với cài đặt cao 0.99f của chúng ta, agent quan tâm gần như nhiều đến phần thưởng tương lai như phần thưởng ngay lập tức, khuyến khích nó học các chiến lược dẫn đến kết quả tốt trong dài hạn."
+                },
+                {
+                    text: "Nó đặt tốc độ agent quên các nỗ lực không thành công",
+                    correct: false,
+                    explanation: "Bộ nhớ về kinh nghiệm trong quá khứ của agent được kiểm soát bởi tham số memorySize, không phải gamma. Gamma ảnh hưởng đến cách agent đánh giá giá trị của các hành động theo thời gian."
+                }
+            ],
+            hint: "Trong môi trường phức tạp hơn, hành động không phải lúc nào cũng dẫn đến phần thưởng ngay lập tức. Làm thế nào để một agent quyết định giữa phần thưởng nhỏ ngay bây giờ so với phần thưởng tiềm năng lớn hơn sau này?"
+        },
+        {
+            question: "Dựa trên những gì bạn đã học, nhiệm vụ nào trong số này PHÙ HỢP NHẤT cho cách tiếp cận học tăng cường?",
+            options: [
+                {
+                    text: "Sắp xếp danh sách số theo thứ tự tăng dần",
+                    correct: false,
+                    explanation: "Sắp xếp là một vấn đề đã được hiểu rõ với các thuật toán tối ưu đã biết. Lập trình truyền thống sẽ phù hợp hơn ở đây vì chúng ta biết chính xác đầu ra chính xác nên có cho bất kỳ đầu vào nào."
+                },
+                {
+                    text: "Cân bằng một robot mô phỏng có động lực khớp nối phức tạp",
+                    correct: true,
+                    explanation: "Lựa chọn hoàn hảo! Cân bằng robot liên quan đến vật lý phức tạp khó mô hình hóa chính xác, với nhiều chiến lược tiềm năng để duy trì cân bằng. Điều này minh họa khi RL tỏa sáng - khi các quy tắc phức tạp và chính sách tối ưu không rõ ràng ngay cả đối với con người."
+                },
+                {
+                    text: "Chuyển đổi nhiệt độ giữa Celsius và Fahrenheit",
+                    correct: false,
+                    explanation: "Đây là một công thức toán học đơn giản (F = C × 9/5 + 32) dễ dàng thực hiện với lập trình truyền thống. Có một câu trả lời đúng duy nhất cho mỗi đầu vào, làm cho học tăng cường không cần thiết phức tạp cho nhiệm vụ này."
+                }
+            ],
+            hint: "Hãy xem xét nhiệm vụ nào có quy tắc khó xác định rõ ràng nhưng có thể được học thông qua thử và sai."
+        }
+    ]}
+/>
+
+## Các bước tiếp theo
+
+Sẵn sàng đi xa hơn? Các bước tiếp theo của bạn có thể là:
+- [Làm thế nào để sử dụng bảng điều khiển?](../beginner/howtodashboard)
+- [Làm việc với Hành động liên tục](../beginner/continuousactions)
+- [Ví dụ Cart-Pole](../beginner/cartpole)
+
+Chúng ta có hai thuật toán chính có sẵn:
+- DQN: Những gì chúng ta vừa sử dụng, tốt cho các lựa chọn đơn giản, hưởng lợi từ bộ nhớ replay lớn.
+- PPO: Nâng cao hơn, xử lý các hành động liên tục (như kiểm soát tốc độ hoặc hướng)
+
+:::note[Hiểu tiến trình của bạn]
+<details>
+    <summary>Những điểm chính</summary>
+
+    Bạn đã học:
+    1. Học tăng cường khác với lập trình truyền thống như thế nào
+    2. Cách tạo môi trường học tập cơ bản
+    3. Cách thiết lập và chạy huấn luyện
+    4. Các khối xây dựng cho các ứng dụng phức tạp hơn
+
+    Quan trọng nhất, bạn đã thấy cách chúng ta có thể dạy máy tính thông qua kinh nghiệm thay vì hướng dẫn rõ ràng.
+</details>
+:::

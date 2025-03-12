@@ -1,0 +1,421 @@
+---
+title: 使用连续动作
+description: RLMatrix 和强化学习中连续动作的介绍。
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+import Quiz from '@/components/Quiz.astro';
+
+让我们从[之前的教程](/beginner/gettingstarted/)项目开始，为其添加连续动作。您可以使用[初始项目](https://github.com/asieradzk/RLMatrixGettingStartedExample1)跟随操作，或者如果您愿意，可以查看[完整项目](https://github.com/asieradzk/RLMatrixGettingStartedExample2_ContinuousActions)。
+
+## 离散动作 vs. 连续动作
+
+在之前的指南中，我们使用了离散动作 - 我们的智能体必须在有限选项集（0 或 1）之间选择以匹配模式。在实际场景中，我们可能会接收大量传感器数据和视觉输入来决定按下哪个按钮。
+
+:::tip[未雨绸缪]
+如果您能够将动作空间离散化，使决策简化为有限数量的按钮按压（离散动作），请务必这样做！这使学习信号更加明显，并大大加速训练，正如我们在本教程中将亲身体验的那样。
+:::
+
+然而，在许多现实应用中，这并不总是可能的。对于控制以下类型的事物：
+- 车辆的转向角度
+- 机械臂的关节扭矩
+- 发动机的功率水平
+
+我们的智能体需要输出连续动作——精确的浮点值，而非分类选择。
+
+## 向环境添加连续动作
+
+让我们修改环境，同时包含离散和连续动作。我们将保留原始的模式匹配任务，但添加第二个模式，我们期望 AI 输出这个新值的平方根。
+
+注意我们只改变了期望值——智能体需要仅通过奖励信号的引导，通过试错来弄清楚我们想要什么！
+
+首先，在 `PatternMatchingEnvironment.cs` 中添加新字段以跟踪第二个模式和连续动作：
+
+```csharp title="PatternMatchingEnvironment.cs" ins="private int pattern2 = 0;" ins="private float aicontinuousChoice = 0f;"
+private int pattern = 0;
+private int pattern2 = 0;
+private int aiChoice = 0;
+private float aicontinuousChoice = 0f;
+private bool roundFinished = false;
+```
+
+接下来，添加第二个观察方法和我们的连续动作方法：
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixObservation]
+public float SeePattern() => pattern;
+
+[RLMatrixObservation]
+public float SeePattern2() => pattern2;
+
+[RLMatrixActionContinuous]
+public void MakeChoiceContinuous(float input)
+{
+    aicontinuousChoice = input;
+}
+```
+
+现在，让我们创建奖励函数：
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float GiveReward() => aiChoice == pattern ? 1.0f : -1.0f;
+
+// 当 AI 的连续输出接近第二个模式的平方根时，添加 +2 奖励
+[RLMatrixReward]
+public float ExtraRewards() => Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2)) < 0.1f ? 2f : 0.0f;
+```
+
+最后，我们需要更新 `StartNewRound` 方法以生成两种模式：
+
+```csharp title="PatternMatchingEnvironment.cs" ins="pattern2 = Random.Shared.Next(10);"
+[RLMatrixReset]
+public void StartNewRound()
+{
+    pattern = Random.Shared.Next(2);
+    pattern2 = Random.Shared.Next(10);
+    aiChoice = 0;
+    roundFinished = false;
+}
+```
+
+注意我们为 pattern2 使用了 0-9 的范围，这给智能体提供了一个更有趣的挑战：预测不同的平方根值。
+
+## 修复编译错误
+
+当您尝试构建解决方案时，您会遇到一系列错误。这实际上很有帮助——RLMatrix 使用强类型来防止运行时错误，并引导您朝着连续动作的正确实现方向前进。
+
+### 错误 1：环境类型不匹配
+
+```
+Argument 1: cannot convert from 'PatternMatchingExample.PatternMatchingEnvironment' to 'RLMatrix.IEnvironmentAsync<float[]>'
+```
+
+这是因为 RLMatrix 为连续和离散环境提供了不同的接口，以确保类型安全。让我们在 `Program.cs` 中更新代码：
+
+```diff lang="csharp" title="Program.cs - Environment Type"
+-var env = new List<IEnvironmentAsync<float[]>> {
++var env = new List<IContinuousEnvironmentAsync<float[]>> {
+    environment,
+    //new PatternMatchingEnvironment().RLInit() //you can add more than one to train in parallel
+};
+```
+
+### 错误 2：智能体类型不匹配
+
+进行此更改后，我们会遇到第二个错误：
+
+```
+Argument 2: cannot convert from 'System.Collections.Generic.List<RLMatrix.IContinuousEnvironmentAsync<float[]>>' to 'System.Collections.Generic.IEnumerable<RLMatrix.IEnvironmentAsync<float[]>>'
+```
+
+这是因为我们试图将离散智能体与连续环境一起使用。我们需要更改智能体类型：
+
+```diff lang="csharp" title="Program.cs - Agent Type"
+-var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
++var agent = new LocalContinuousRolloutAgent<float[]>(learningSetup, env);
+```
+
+### 错误 3：算法选项不匹配
+
+这导致我们的第三个错误：
+
+```
+Argument 1: cannot convert from 'RLMatrix.DQNAgentOptions' to 'RLMatrix.PPOAgentOptions'
+```
+
+这个最终错误表明 DQN 与连续动作不兼容。我们需要切换到 PPO（近端策略优化），它可以处理离散和连续动作空间：
+
+```diff lang="csharp" title="Program.cs - Algorithm Options"
+-var learningSetup = new DQNAgentOptions(
+-    batchSize: 32,      
+-    memorySize: 1000,   
+-    gamma: 0.99f,      
+-    epsStart: 1f,     
+-    epsEnd: 0.05f,      
+-    epsDecay: 150f      
+-);
++var learningSetup = new PPOAgentOptions(
++    batchSize: 128,
++    memorySize: 1000,
++    gamma: 0.99f,
++    width: 128,
++    lr: 1E-03f
++);
+```
+
+:::note[DQN vs PPO]
+DQN 专为离散动作空间设计，没有处理连续输出的机制。而 PPO 则是一种 actor-critic 算法，可以同时处理离散动作、连续动作或两者兼而有之。
+
+每种算法都有其优势——DQN 对于离散问题可能非常样本高效，而 PPO 通常更稳健地处理复杂环境。RLMatrix 提供了这两种算法，因此您可以根据特定需求进行选择。
+:::
+
+
+
+## 我们的首次训练运行
+
+现在让我们运行训练，看看会发生什么：
+
+```bash title="Training Output"
+Step 800/1000 - Last 50 steps accuracy: 42.0%
+Press Enter to continue...
+
+Step 850/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 37.0%
+Press Enter to continue...
+```
+
+惊讶吧！AI 几乎没有学到任何东西。准确率没有超过 50%，如果查看仪表板，我们会发现它定期获得离散动作（匹配模式）的 +1 奖励，但很少获得连续动作（预测 √pattern2）的 +2 奖励。
+
+## 为什么会这样？
+
+问问自己：为什么 AI 学习离散动作比连续动作容易得多？
+
+您的第一直觉可能是学习率(`lr`)——也许太低了？让我们尝试将其更改为 `1E-02f` 并再次运行训练...
+
+有帮助吗？可能没有。事实上，您可能会注意到，虽然智能体学习离散动作更快，但它几乎不探索连续动作空间，随着训练的进行，准确率甚至变得更糟。
+
+那么，究竟发生了什么？
+
+:::caution[根本挑战]
+AI 通过随机探索恰好击中正确连续动作的可能性微乎其微。
+
+想一想：
+- 对于离散选择（0 或 1），随机猜测有 50% 的机会正确
+- 对于连续值，随机输出以下值的几率是多少：
+- 当 pattern2 = 0 时，√0 = 0
+- 当 pattern2 = 1 时，√1 = 1
+- 当 pattern2 = 2 时，√2 ≈ 1.414
+- 当 pattern2 = 3 时，√3 ≈ 1.732
+- ...以此类推直到 √9 = 3
+
+这造成了稀疏奖励问题——智能体很少偶然得到正确的动作，因此几乎没有有用的反馈可以学习。
+:::
+
+## 添加指导信号
+
+让我们尝试通过提供更有帮助的奖励信号来解决这个问题。我们将添加一个随着智能体接近正确平方根而增加的奖励，而不是仅奖励精确匹配：
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float ExtraSupportingReward() => 0.5f / (1 + Math.Abs(aicontinuousChoice - (float)Math.Sqrt(pattern2)));
+
+//别忘了将 lr 改回 1E-03f！
+```
+
+这个奖励函数创建了一个梯度——随着智能体接近正确值，信号会变得更强。即使它不完全正确，它也会得到关于是变"热"还是变"冷"的反馈。
+
+:::tip[奖励工程]
+这说明了强化学习中一个关键原则，称为**奖励塑造**：
+
+- **稀疏奖励**（全有或全无）使在连续空间中的学习几乎不可能
+- **密集/塑造的奖励**创建了一个引导学习过程的梯度
+- 即使是关于"变热"的微小信号也能使学习时间从无限长变为几小时
+
+可以把它想象成帮助蒙眼的人穿过房间：
+- 稀疏奖励："你已经到达门口"（否则一片寂静）
+- 塑造的奖励："热了...更热了...冷了...又热了..."
+
+第二种方法更可靠地导向成功。这对于智能体需要发现精确值的连续控制问题尤为关键。
+:::
+
+让我们再次运行训练，看看会发生什么：
+
+```bash title="Training Output"
+Step 850/1000 - Last 50 steps accuracy: 35.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 47.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 36.0%
+Press Enter to continue...
+```
+
+我们看到一些小的改进，但仍然不太理想。仪表板可能显示学习正在进行的迹象，但显然，对于这个更复杂的任务，我们需要更多的训练时间。
+
+## 延长训练时间
+
+对于连续动作预测等更复杂的挑战，我们通常需要更多的训练步骤。让我们修改程序，训练 10,000 步而不是 1,000 步：
+
+```csharp title="Program.cs" {1,5}
+for (int i = 0; i < 10000; i++)
+{
+    await agent.Step();
+
+    if ((i + 1) % 500 == 0)
+    {
+        Console.WriteLine($"Step {i + 1}/10000 - Last 500 steps accuracy: {environment.RecentAccuracy:F1}%");
+        environment.ResetStats();
+        
+        Console.WriteLine("\nPress Enter to continue...");
+        Console.ReadLine();
+    }
+}
+```
+
+## 实验：学习率的影响
+
+在观察更长的训练进度时，尝试使用不同的学习率进行实验。如果进一步降低会发生什么？如果显著提高呢？
+
+在我的实验中，设置非常高的学习率会导致模型陷入只收集离散动作的 +1 奖励，同时完全无法充分探索连续空间。
+
+:::tip[学习率洞察]
+特别是使用 PPO 时，增加学习率并不总是对探索有利：
+
+- **太高**：智能体会快速固定在最先发现的策略上，往往忽略更难发现的连续动作模式
+- **太低**：学习进行得痛苦地慢，但探索更彻底
+- **恰到好处**：为您的任务适当地平衡探索和利用
+
+学习率与探索质量之间的这种反直觉关系在处理连续动作空间时尤为重要。
+:::
+
+## 关键要点
+
+通过这个练习，我们学到了几个重要的教训：
+
+1. **连续动作本质上比离散动作更难学习**，这是由于稀疏奖励问题。如果可能的话，将您的动作空间离散化！
+
+2. **奖励工程对连续控制问题至关重要**。提供关于"变热"的信号将一个不可能的学习任务转变为可处理的任务。
+
+3. **复杂任务需要更多训练时间**。随着我们向动作空间添加维度，我们需要相应地扩展训练持续时间。
+
+4. **算法选择至关重要**。DQN 根本无法处理连续动作，而 PPO 可以处理离散、连续或混合动作空间。
+
+5. **学习率调整是微妙的**，特别是使用 PPO 时。更高并不总是更好，有时对探索甚至可能更糟。
+
+这些原则在您应对更复杂的 RLMatrix 强化学习挑战时将为您提供很好的帮助。
+
+## 测试您的理解
+
+<Quiz
+    title="理解连续动作"
+    questions={[
+        {
+            question: "为什么智能体学习连续动作比离散动作困难得多？",
+            options: [
+                {
+                    text: "连续动作由于神经网络计算的复杂性需要更多计算资源",
+                    correct: false,
+                    explanation: "虽然连续动作空间可能需要更复杂的神经网络，但这不是学习难度的根本原因。核心挑战更加根本地影响强化学习中的探索-利用问题。"
+                },
+                {
+                    text: "随机探索正确连续值的概率与从小型离散选项集中选择相比微乎其微",
+                    correct: true,
+                    explanation: "完全正确！这就是稀疏奖励问题的影响。随机探索时，智能体可能有 50% 的几率猜对离散二元选择，但在所有可能的浮点值中找到精确的 √2 ≈ 1.414... 通过纯粹的偶然几乎是不可能的。如果没有适当的奖励塑造，这使得初始学习信号极其罕见。"
+                },
+                {
+                    text: "PPO 算法天生比 DQN 算法对所有类型的学习任务效率低",
+                    correct: false,
+                    explanation: "这不准确。PPO 和 DQN 各有优势 - DQN 对离散问题可能更样本高效，而 PPO 更加多功能，可以处理 DQN 根本无法处理的连续动作空间。没有一种算法普遍优于另一种。"
+                }
+            ],
+            hint: "思考智能体在训练开始时随机探索时会发生什么。在每种情况下，它找到正确动作的几率是多少？"
+        },
+        {
+            question: "什么关键技术将我们的连续动作学习问题从几乎不可能转变为可行？",
+            options: [
+                {
+                    text: "将训练步骤从 1,000 增加到 10,000",
+                    correct: false,
+                    explanation: "虽然更多训练时间很重要，但它本身无法解决根本的稀疏奖励问题。如果没有我们做出的更重要改变，我们的智能体仍会努力学习。"
+                },
+                {
+                    text: "从 DQN 切换到 PPO 算法",
+                    correct: false,
+                    explanation: "这种改变是必要的（因为 DQN 根本无法处理连续动作），但还不够。即使有 PPO，我们的智能体最初也在稀疏奖励信号下挣扎。"
+                },
+                {
+                    text: "添加一个塑造的奖励函数，根据智能体接近正确值的程度提供反馈",
+                    correct: true,
+                    explanation: "正是如此！这就是奖励塑造的实际应用。通过添加 ExtraSupportingReward 函数（返回 0.5f / (1 + Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2))）），我们创建了一个梯度，即使智能体不完全正确，也能提供有用的学习信号。这就像给予'热/冷'反馈，而不是在找到确切目标前一片寂静。"
+                }
+            ],
+            hint: "考虑哪种变化解决了连续动作空间中稀疏奖励的根本挑战。"
+        },
+        {
+            question: "关于 PPO 中连续动作任务的学习率，我们观察到了什么反直觉的关系？",
+            options: [
+                {
+                    text: "更高的学习率导致智能体只关注更容易的离散奖励而忽视连续动作",
+                    correct: true,
+                    explanation: "没错！我们观察到，使用非常高的学习率，智能体会快速学习离散动作模式（+1 奖励），然后固定在那上面，有效地忽略了提供 +2 奖励但更难发现的连续动作空间。这展示了学习率如何影响探索/利用平衡。"
+                },
+                {
+                    text: "较低的学习率总是导致更快地收敛到最优策略",
+                    correct: false,
+                    explanation: "这与我们观察到的相反。较低的学习率实际上导致整体学习速度变慢，但有时对连续动作空间的探索更好。这需要找到一个微妙的平衡。"
+                },
+                {
+                    text: "学习率对训练结果没有有意义的影响",
+                    correct: false,
+                    explanation: "学习率对训练结果有重大影响。它影响了学习速度，更重要的是，探索-利用平衡，特别是关于智能体如何优先考虑更容易的离散奖励与更难发现的连续动作模式。"
+                }
+            ],
+            hint: "回想一下我们用不同学习率实验时发生了什么，以及它如何影响智能体发现两种类型奖励的能力。"
+        },
+        {
+            question: "如果您正在设计一个机器人控制系统，需要确定按下哪个按钮（在 4 个按钮中选择）以及施加多少压力（0-100%），根据这堂课，哪种方法最有效？",
+            options: [
+                {
+                    text: "使用 DQN 因其效率，并将压力离散化为 10 个等级（0%、10%、20% 等）",
+                    correct: true,
+                    explanation: "极佳的选择！这遵循了教程的关键原则：'如果您可以离散化动作空间，就去做！'通过将压力转换为 10 个离散等级，我们将困难的连续问题转变为可管理的离散问题，总共只有 40 个动作（4 个按钮 × 10 个压力等级）。DQN 将比努力处理连续值更有效地学习这个离散化空间。"
+                },
+                {
+                    text: "使用带默认设置的 PPO，让它同时解决两个方面",
+                    correct: false,
+                    explanation: "虽然 PPO 可以处理混合动作空间，但仅使用默认设置可能导致次优学习。课程告诉我们，连续动作本质上难以通过随机探索学习。如果没有离散化或仔细的奖励塑造，学习将效率低下。"
+                },
+                {
+                    text: "使用带有塑造奖励的 PPO，提供有关压力准确性的梯度反馈，并将压力视为真正的连续值",
+                    correct: false,
+                    explanation: "虽然这种方法最终可能会起作用，但它忽略了教程的关键见解，即在可能的情况下离散化动作会导致更快、更可靠的学习。将压力视为连续值创造了一个不必要的困难学习问题，而将其离散化为 10 个等级对任务可能已经足够。"
+                }
+            ],
+            hint: "记住教程关于在可能时离散化动作空间的强烈建议，并考虑哪种方法最大程度地简化了学习问题。"
+        },
+        {
+            question: "根据我们看到的模式，哪种场景可能对强化学习智能体最具挑战性？",
+            options: [
+                {
+                    text: "学习选择迷宫中三条预定义路线之一",
+                    correct: false,
+                    explanation: "这是一个只有三个选项的简单离散动作问题。根据我们的课程，具有少量选项的离散动作空间对于强化学习智能体来说是最容易有效探索的。"
+                },
+                {
+                    text: "学习将系统温度精确调整到 37.85°C 并保持最小波动",
+                    correct: true,
+                    explanation: "这确实是最具挑战性的场景！它涉及找到一个极其精确的连续值（恰好 37.85°C）并保持最小偏差。如果没有适当塑造的奖励，智能体将难以通过随机探索发现这个精确设定点，这正是我们讨论的那种稀疏奖励问题。"
+                },
+                {
+                    text: "学习基于视觉输入识别和分类 10 种不同类型的对象",
+                    correct: false,
+                    explanation: "虽然这涉及更多离散选项（10 个类别），但它仍然是一个基本的离散分类问题。智能体会收到关于其分类是否正确的明确反馈，避免了连续动作空间的稀疏奖励挑战。"
+                }
+            ],
+            hint: "思考哪种场景在动作空间探索方面如同大海捞针。"
+        }
+    ]}
+/>
+
+## 下一步
+
+现在您已经了解了连续动作空间的挑战以及如何应对这些挑战，您已准备好尝试一个具有更复杂观察的经典强化学习问题。
+
+<LinkCard
+    title="Cart-Pole 示例"
+    description="学习如何使用强化学习在移动小车上平衡杆子。"
+    href="/beginner/cartpole/"
+/>

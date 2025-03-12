@@ -1,0 +1,430 @@
+---
+title: Erste Schritte mit RLMatrix
+description: Eine anfängerfreundliche Einführung in Reinforcement Learning mit C#.
+---
+import Quiz from '@/components/Quiz.astro';
+
+:::tip[Erfahrung mit RL?]
+Wenn Sie bereits mit den Konzepten des Reinforcement Learning vertraut sind, sehen Sie sich unseren [Schnellstart-Leitfaden](../quickstart/setup) für eine schnellere Einrichtung an.
+:::
+
+## Einführung
+
+Wenn wir traditionelle Programme schreiben, sagen wir dem Computer genau, was er in jeder Situation tun soll. Zum Beispiel, wenn wir ein Programm schreiben wollten, das Zahlen abgleicht, könnten wir schreiben:
+
+```csharp
+if (input == pattern)
+{
+    return "Korrekt!";
+}
+else 
+{
+    return "Versuche es erneut!";
+}
+```
+
+Aber was, wenn wir möchten, dass unser Programm selbstständig lernt? Was, wenn die Regeln zu komplex sind, um sie aufzuschreiben, oder wir die Regeln selbst nicht kennen? Hier kommt Reinforcement Learning ins Spiel.
+
+:::note[Was ist Reinforcement Learning?]
+<details>
+    <summary>Eine einfache Erklärung</summary>
+
+    Stellen Sie sich vor, wie Sie ein neues Videospiel lernen könnten:
+    1. Sie probieren einige Steuerungen aus, um zu sehen, was passiert
+    2. Sie sehen, wie das Spiel reagiert
+    3. Sie bekommen Punkte oder verlieren Leben
+    4. Mit der Zeit lernen Sie, was am besten funktioniert
+
+    Reinforcement Learning folgt dem gleichen Muster:
+    1. Die KI (wir nennen sie einen "Agenten") probiert verschiedene Aktionen aus
+    2. Sie sieht, was in ihrer Umgebung passiert
+    3. Sie erhält Belohnungen oder Strafen
+    4. Mit der Zeit lernt sie, welche Aktionen am besten funktionieren
+
+    Niemand sagt der KI genau, was zu tun ist - sie findet es durch Versuch und Irrtum heraus.
+</details>
+:::
+
+## Einrichten Ihres Projekts
+Sie können mitverfolgen oder dieses [GitHub-Repository](https:/www.github.com/RLMatrix/RLMatrix-Example) klonen.
+Lassen Sie uns zunächst alles installieren:
+
+```bash title="Installation von RLMatrix über NuGet"
+dotnet add package RLMatrix
+dotnet add package RLMatrix.Toolkit
+```
+
+:::caution[Hardware-Anforderungen]
+RLMatrix wurde nur auf Windows-PCs mit einer NVIDIA-GPU getestet. Dies ist jedoch nicht notwendig, und für viele Anwendungsfälle wird das Training und die Inferenz auf der CPU ausreichend oder sogar schneller sein.
+
+Wenn Sie keine kompatible Grafikkarte haben, können Sie:
+1. Den Quellcode aus dem [RLMatrix-Repository](https://github.com/asieradzk/RL_Matrix) herunterladen
+2. Ihn ändern, um stattdessen Ihre CPU zu verwenden (suchen Sie nach `TorchSharp-cuda-windows` in RLMatrix.csproj)
+3. Ihn selbst bauen
+:::
+
+## Ihre erste Lernumgebung
+
+Lassen Sie uns etwas Einfaches, aber Sinnvolles erstellen - eine Umgebung, in der unsere KI lernt, Muster abzugleichen. Obwohl dies einfach erscheint (und direkt zu programmieren trivial wäre), führt es alle Schlüsselkonzepte ein, die wir benötigen.
+
+:::note[Bausteine]
+<details>
+    <summary>Wichtige Begriffe erklärt</summary>
+
+    Bevor wir eintauchen, lassen Sie uns einige wichtige Begriffe verstehen:
+
+    - **Umgebung**: Die Welt, in der unsere KI lebt. Wie ein Spielbrett oder eine Simulation.
+
+    - **Zustand/Beobachtung**: Was unsere KI über ihre Umgebung sehen oder wissen kann.
+    Zum Beispiel: Das aktuelle Muster, das sie abgleichen muss.
+
+    - **Aktion**: Etwas, das unsere KI tun kann.
+    Zum Beispiel: Eine Zahl auswählen.
+
+    - **Belohnung**: Feedback, das unserer KI sagt, wie gut sie abschneidet.
+    Zum Beispiel: +1 für einen korrekten Abgleich, -1 für einen falschen Abgleich.
+
+    - **Episode**: Ein vollständiger Versuch der Aufgabe.
+    Denken Sie daran wie an eine Runde in einem Spiel.
+
+</details>
+:::
+
+Hier ist unsere vollständige Umgebung:
+
+```csharp title="PatternMatchingEnvironment.cs"
+using RLMatrix.Toolkit;
+
+namespace PatternMatchingExample;
+
+[RLMatrixEnvironment]
+public partial class PatternMatchingEnvironment
+{
+    private int pattern = 0;
+    private int aiChoice = 0;
+    private bool roundFinished = false;
+
+    // Einfache Zähler für die letzten 50 Schritte
+    private int correct = 0;
+    private int total = 0;
+
+    // Einfache Genauigkeitsberechnung
+    public float RecentAccuracy => total > 0 ? (float)correct / total * 100 : 0;
+
+    [RLMatrixObservation]
+    public float SeePattern() => pattern;
+
+    [RLMatrixActionDiscrete(2)]
+    public void MakeChoice(int choice)
+    {
+        aiChoice = choice;
+        roundFinished = true;
+
+        // Zähler aktualisieren
+        total++;
+        if (aiChoice == pattern) correct++;
+    }
+
+    [RLMatrixReward]
+    public float GiveReward() => aiChoice == pattern ? 1.0f : -1.0f;
+
+    [RLMatrixDone]
+    public bool IsRoundOver() => roundFinished;
+
+    [RLMatrixReset]
+    public void StartNewRound()
+    {
+        pattern = Random.Shared.Next(2);
+        aiChoice = 0;
+        roundFinished = false;
+    }
+
+    public void ResetStats()
+    {
+        correct = 0;
+        total = 0;
+    }
+}
+```
+
+:::note[Den Code verstehen]
+<details>
+    <summary>Code-Aufschlüsselung</summary>
+
+    Betrachten wir jeden Teil:
+
+    **Die Variablen:**
+    ```csharp
+    private int pattern = 0;      // Die Zahl, die abgeglichen werden soll
+    private int aiChoice = 0;     // Die Vermutung der KI
+    private bool roundFinished = false;  // Rundenstatus
+    ```
+    Diese halten fest, was in unserer Umgebung passiert.
+
+    **Die speziellen Attribute:**
+    - `[RLMatrixEnvironment]`: Teilt RLMatrix mit: "Dies ist eine Lernumgebung"
+    - `[RLMatrixObservation]`: "Das ist, was die KI sehen kann"
+    - `[RLMatrixActionDiscrete]`: "Dies sind die Auswahlmöglichkeiten der KI"
+    - `[RLMatrixReward]`: "So bewerten wir die Leistung der KI"
+    - `[RLMatrixReset]`: "So beginnen wir von vorne"
+
+    Das Toolkit verwendet diese Attribute, um den erforderlichen Code automatisch zu generieren.
+</details>
+:::
+
+## Training Ihrer KI
+
+Jetzt kommt der interessante Teil - unserer KI beibringen, Muster abzugleichen. Wir werden einen Algorithmus namens DQN (Deep Q-Network) verwenden. Machen Sie sich nicht zu viele Gedanken über den Namen - es ist nur eine Methode, KI beizubringen, Entscheidungen zu treffen.
+
+:::note[Trainingsoptionen]
+<details>
+    <summary>Trainingseinstellungen verstehen</summary>
+
+    Wir müssen konfigurieren, wie unsere KI lernt:
+
+    - `batchSize`: Wie viele Erfahrungen auf einmal gelernt werden sollen
+    Stellen Sie sich vor, mehrere vergangene Versuche gemeinsam zu überprüfen.
+
+    - `memorySize`: Wie viele vergangene Erfahrungen zu merken sind
+    Wie das Führen eines Notizbuchs darüber, was funktioniert hat und was nicht.
+
+    - `gamma`: Wie viel Wert auf zukünftige Belohnungen gelegt werden soll
+    Höhere Werte (näher an 1) lassen die KI langfristig denken.
+
+    - `epsStart` und `epsEnd`: Wie viel erkundet vs. bekannt genutzt werden soll
+    Wie das Ausprobieren neuer Strategien vs. das Festhalten an dem, was funktioniert.
+
+    Detaillierte Erklärungen zu allen Parametern und ihren Auswirkungen finden Sie in unserem [Parameter-Referenzhandbuch](../../reference/hyperparameters).
+</details>
+:::
+
+So richten wir das Training ein:
+
+```csharp title="Program.cs"
+using RLMatrix.Agents.Common;
+using RLMatrix;
+using PatternMatchingExample;
+
+Console.WriteLine("Starte Musterabgleich-Training...\n");
+
+// Einrichten, wie unsere KI lernen wird
+var learningSetup = new DQNAgentOptions(
+    batchSize: 32,      // Von 32 Erfahrungen auf einmal lernen
+    memorySize: 1000,   // Die letzten 1000 Versuche merken
+    gamma: 0.99f,       // Viel Wert auf zukünftige Belohnungen legen
+    epsStart: 1f,       // Zunächst alles ausprobieren
+    epsEnd: 0.05f,      // Schließlich an dem festhalten, was funktioniert
+    epsDecay: 150f      // Wie schnell der Übergang erfolgt
+);
+
+// Unsere Umgebung erstellen
+var environment = new PatternMatchingEnvironment().RLInit();
+var env = new List<IEnvironmentAsync<float[]>> { 
+    environment,
+    //new PatternMatchingEnvironment().RLInit() //Sie können mehr als eine hinzufügen, um parallel zu trainieren
+};
+
+// Unseren Lernagenten erstellen
+var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
+
+// Lassen wir ihn lernen!
+for (int i = 0; i < 1000; i++)
+{
+    await agent.Step();
+
+    if ((i + 1) % 50 == 0)
+    {
+        Console.WriteLine($"Schritt {i + 1}/1000 - Genauigkeit der letzten 50 Schritte: {environment.RecentAccuracy:F1}%");
+        environment.ResetStats();
+        
+        Console.WriteLine("\nDrücken Sie Enter zum Fortfahren...");
+        Console.ReadLine();
+    }
+}
+
+Console.WriteLine("\nTraining abgeschlossen!");
+Console.ReadLine();
+```
+
+Wenn Sie diesen Code ausführen, sehen Sie den Trainingsfortschritt alle 50 Schritte angezeigt:
+
+```bash title="Trainingsfortschritt"
+Starte Musterabgleich-Training...
+
+Schritt 50/1000 - Genauigkeit der letzten 50 Schritte: 48.0%
+Drücken Sie Enter zum Fortfahren...
+
+Schritt 100/1000 - Genauigkeit der letzten 50 Schritte: 68.0%
+Drücken Sie Enter zum Fortfahren...
+
+Schritt 150/1000 - Genauigkeit der letzten 50 Schritte: 86.0%
+Drücken Sie Enter zum Fortfahren...
+
+Schritt 200/1000 - Genauigkeit der letzten 50 Schritte: 82.0%
+Drücken Sie Enter zum Fortfahren...
+```
+
+:::tip[Was zu erwarten ist]
+Während Sie den Trainingsfortschritt beobachten, werden Sie sehen, wie sich Ihre KI verbessert:
+
+1. Anfangs etwa 50% Genauigkeit (zufälliges Raten)
+2. Stetig verbesserte Genauigkeit während sie lernt
+3. Schließlich Erreichen einer Genauigkeit von 80-90% oder höher
+
+Die Pausen alle 50 Schritte ermöglichen es Ihnen, diese Entwicklung von zufälligen Vermutungen zu geschicktem Abgleichen zu beobachten. Das ist Reinforcement Learning in Aktion!
+:::
+
+## Jenseits des einfachen Abgleichens
+
+Obwohl unser Beispiel unkompliziert ist, gelten die gleichen Prinzipien für viel komplexere Probleme:
+
+:::note[Anwendungen in der realen Welt]
+<details>
+    <summary>Wohin das führen kann</summary>
+
+    Die gleiche grundlegende Struktur, die wir hier verwendet haben, skaliert für:
+    - Spielende KI
+    - Robotersteuerung
+    - Ressourcenmanagement
+    - Verkehrsoptimierung
+
+    Der Hauptunterschied liegt in der Komplexität der Zustände und Aktionen, nicht im grundlegenden Ansatz.
+</details>
+:::
+
+## Testen Sie Ihr Verständnis
+<Quiz
+    title="Grundlagen des Reinforcement Learning verstehen"
+    questions={[
+        {
+            question: "Warum würden wir Reinforcement Learning gegenüber traditioneller Programmierung für eine Aufgabe wählen?",
+            options: [
+                {
+                    text: "Wenn wir benötigen, dass das Programm mit extremer Präzision arbeitet",
+                    correct: false,
+                    explanation: "Tatsächlich übertrifft traditionelle Programmierung oft die Präzision, wenn wir genau wissen, was wir wollen. Reinforcement Learning glänzt in Szenarien, in denen die Regeln komplex oder unbekannt sind, nicht unbedingt, wenn maximale Präzision das Ziel ist."
+                },
+                {
+                    text: "Wenn die Regeln zu komplex sind, um sie manuell zu programmieren, oder wir sie selbst nicht vollständig kennen",
+                    correct: true,
+                    explanation: "Genau richtig! Reinforcement Learning ist besonders wertvoll, wenn die Regeln zu komplex sind, um sie zu spezifizieren (wie das Balancieren eines Roboters), oder wenn wir den optimalen Ansatz selbst nicht vollständig verstehen. Die KI kann Lösungen durch Erfahrung entdecken, anstatt explizit programmiert zu werden."
+                },
+                {
+                    text: "Wenn wir benötigen, dass das Programm schneller läuft als traditioneller Code",
+                    correct: false,
+                    explanation: "Reinforcement Learning geht nicht um Ausführungsgeschwindigkeit - tatsächlich läuft traditionelle Programmierung normalerweise schneller. RL dreht sich darum, Programme durch Erfahrung lernen zu lassen, anstatt sie explizit für jede Situation zu kodieren."
+                }
+            ],
+            hint: "Denken Sie an die Einschränkungen der traditionellen if/else-Programmierung im Vergleich dazu, ein System Muster durch Versuch und Irrtum entdecken zu lassen."
+        },
+        {
+            question: "Warum war es in unserem Beispiel wichtig, epsStart auf 1.0 und epsEnd auf einen niedrigeren Wert wie 0.05 zu setzen?",
+            options: [
+                {
+                    text: "Dies stellt sicher, dass der Agent immer die Aktion mit der höchsten Belohnung auswählt",
+                    correct: false,
+                    explanation: "Das ist nicht ganz der Zweck. Wenn der Agent immer das wählen würde, was er für das Beste hält (nur Ausnutzung), würde er nie potenziell bessere Strategien entdecken, die er noch nicht ausprobiert hat."
+                },
+                {
+                    text: "Diese Einstellungen steuern die Lernrate des Agenten im Laufe der Zeit",
+                    correct: false,
+                    explanation: "Obwohl sich diese Parameter im Laufe der Zeit ändern, steuern sie nicht direkt die Lernrate (das wäre der 'lr'-Parameter). Sie steuern etwas anderes Grundlegendes für Reinforcement Learning."
+                },
+                {
+                    text: "Dies schafft ein Gleichgewicht zwischen Erkundung (Neues ausprobieren) und Ausnutzung (Nutzen, was funktioniert), das sich im Laufe der Zeit verschiebt",
+                    correct: true,
+                    explanation: "Das ist richtig! Dies ist das klassische Erkundungs-Ausnutzungs-Gleichgewicht. Durch den Start mit epsStart: 1f probiert der Agent zunächst alles aus (reine Erkundung). Im Verlauf des Trainings verschiebt er sich allmählich in Richtung epsEnd: 0.05f, wo er hauptsächlich das nutzt, was seiner Erfahrung nach am besten funktioniert (hauptsächlich Ausnutzung), während er gelegentlich noch erkundet."
+                }
+            ],
+            hint: "Überlegen Sie, was am Anfang des Trainings im Vergleich zu später passiert - wie ändert sich das Verhalten des Agenten und warum ist das wichtig?"
+        },
+        {
+            question: "Was würde wahrscheinlich passieren, wenn wir unsere Belohnungsfunktion so ändern würden, dass sie nur +1 für korrekte Abgleiche gibt, aber keine Strafe für falsche Abgleiche?",
+            options: [
+                {
+                    text: "Das Lernen wäre schneller, weil der Agent nur positives Feedback erhalten würde",
+                    correct: false,
+                    explanation: "Ohne Strafen würde der Agent tatsächlich langsamer oder möglicherweise gar nicht lernen. Mit nur positiven Belohnungen bringt zufälliges Raten immer noch in 50% der Fälle Belohnungen, was wenig Anreiz bietet, über den Zufall hinaus zu verbessern."
+                },
+                {
+                    text: "Das Lernen wäre langsamer oder würde scheitern, weil der Agent kein klares Feedback über falsche Aktionen erhalten würde",
+                    correct: true,
+                    explanation: "Genau! Dies unterstreicht die Bedeutung gut gestalteter Belohnungsfunktionen. Ohne Strafen für falsche Abgleiche erhält der Agent kein Feedback, das falsch von richtig unterscheidet, wenn er einen Fehler macht. Er könnte zu dem Schluss kommen, dass zufälliges Raten gut genug ist, da er immer noch in der Hälfte der Zeit Belohnungen erhält."
+                },
+                {
+                    text: "Der Agent würde das gleiche Muster lernen, bräuchte aber mehr Speicher, um die Erfahrungen zu speichern",
+                    correct: false,
+                    explanation: "Speicheranforderungen stehen nicht direkt im Zusammenhang mit der Belohnungsstruktur. Das Hauptproblem hier ist die Qualität der Lernsignale, die der Agent erhält, nicht wie viel Speicher er verwendet."
+                }
+            ],
+            hint: "Denken Sie darüber nach, was das Lernen motiviert - ist es nur das Erhalten von Belohnungen oder auch das Vermeiden von Strafen?"
+        },
+        {
+            question: "Welche Rolle spielt gamma (in unserem Beispiel auf 0.99f gesetzt) im Lernprozess?",
+            options: [
+                {
+                    text: "Es bestimmt, wie viele Muster der Agent gleichzeitig memorieren kann",
+                    correct: false,
+                    explanation: "Die Kapazität der Mustermemorisierung hängt hauptsächlich von der Architektur des neuronalen Netzwerks ab, nicht vom gamma-Parameter. Gamma dient einem anderen Zweck bei der Bewertung von Belohnungen durch den Agenten."
+                },
+                {
+                    text: "Es steuert, wie sehr der Agent unmittelbare Belohnungen im Vergleich zu potenziellen zukünftigen Belohnungen schätzt",
+                    correct: true,
+                    explanation: "Korrekt! Gamma ist der Diskontierungsfaktor, der bestimmt, wie der Agent zukünftige Belohnungen im Vergleich zu unmittelbaren bewertet. Mit unserer hohen Einstellung von 0.99f kümmert sich der Agent fast genauso um zukünftige Belohnungen wie um unmittelbare, was ihn ermutigt, Strategien zu lernen, die langfristig zu guten Ergebnissen führen."
+                },
+                {
+                    text: "Es legt fest, wie schnell der Agent erfolglose Versuche vergisst",
+                    correct: false,
+                    explanation: "Das Gedächtnis des Agenten für vergangene Erfahrungen wird durch den memorySize-Parameter gesteuert, nicht durch gamma. Gamma beeinflusst, wie der Agent den Wert von Aktionen über die Zeit bewertet."
+                }
+            ],
+            hint: "In komplexeren Umgebungen führen Aktionen nicht immer zu sofortigen Belohnungen. Wie würde ein Agent zwischen einer kleinen Belohnung jetzt und potenziell größeren Belohnungen später entscheiden?"
+        },
+        {
+            question: "Basierend auf dem, was Sie gelernt haben, welche dieser Aufgaben wäre AM BESTEN für einen Reinforcement-Learning-Ansatz geeignet?",
+            options: [
+                {
+                    text: "Sortieren einer Liste von Zahlen in aufsteigender Reihenfolge",
+                    correct: false,
+                    explanation: "Sortieren ist ein gut verstandenes Problem mit bereits bekannten optimalen Algorithmen. Traditionelle Programmierung wäre hier angemessener, da wir genau wissen, was die korrekte Ausgabe für jede Eingabe sein sollte."
+                },
+                {
+                    text: "Balancieren eines simulierten Roboters mit komplexer Gelenkdynamik",
+                    correct: true,
+                    explanation: "Perfekte Wahl! Roboterbalancierung beinhaltet komplexe Physik, die schwer präzise zu modellieren ist, mit vielen potenziellen Strategien zur Aufrechterhaltung des Gleichgewichts. Dies veranschaulicht, wann RL glänzt - wenn die Regeln komplex sind und die optimale Richtlinie selbst für Menschen nicht offensichtlich ist."
+                },
+                {
+                    text: "Umrechnen von Temperatur zwischen Celsius und Fahrenheit",
+                    correct: false,
+                    explanation: "Dies ist eine einfache mathematische Formel (F = C × 9/5 + 32), die leicht mit traditioneller Programmierung implementiert werden kann. Es gibt eine einzige korrekte Antwort für jede Eingabe, was Reinforcement Learning für diese Aufgabe unnötig komplex macht."
+                }
+            ],
+            hint: "Überlegen Sie, welche Aufgabe Regeln hat, die schwer explizit zu spezifizieren sind, aber durch Versuch und Irrtum gelernt werden könnten."
+        }
+    ]}
+/>
+
+## Nächste Schritte
+
+Bereit, weiterzugehen? Ihre nächsten Schritte könnten sein:
+- [Wie benutzt man das Dashboard?](../beginner/howtodashboard)
+- [Arbeiten mit kontinuierlichen Aktionen](../beginner/continuousactions)
+- [Cart-Pole Beispiel](../beginner/cartpole)
+
+Wir haben zwei Hauptalgorithmen verfügbar:
+- DQN: Was wir gerade verwendet haben, gut für einfache Entscheidungen, profitiert von großem Replay-Speicher.
+- PPO: Fortgeschrittener, handhabt kontinuierliche Aktionen (wie Steuerung von Geschwindigkeit oder Richtung)
+
+:::note[Verstehen Ihres Fortschritts]
+<details>
+    <summary>Wichtige Erkenntnisse</summary>
+
+    Sie haben gelernt:
+    1. Wie sich Reinforcement Learning von traditioneller Programmierung unterscheidet
+    2. Wie man eine grundlegende Lernumgebung erstellt
+    3. Wie man das Training einrichtet und durchführt
+    4. Die Bausteine für komplexere Anwendungen
+
+    Am wichtigsten ist, dass Sie gesehen haben, wie wir Computern durch Erfahrung statt durch explizite Anweisungen beibringen können.
+</details>
+:::

@@ -1,0 +1,130 @@
+---
+title: Cách Sử Dụng Dashboard
+description: Tìm hiểu cách sử dụng Bảng Điều Khiển RLMatrix để theo dõi tiến trình huấn luyện AI của bạn theo thời gian thực.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+Tiếp nối từ hướng dẫn [Bắt Đầu](/beginner/gettingstarted/) của chúng tôi, bạn có thể đang thắc mắc làm thế nào để theo dõi tiến trình huấn luyện AI của mình. Mặc dù việc in kết quả ra console hoạt động tốt cho các ví dụ đơn giản, nhưng các dự án trong thực tế thường đòi hỏi hệ thống giám sát phức tạp hơn.
+
+Bảng Điều Khiển RLMatrix cung cấp khả năng hiển thị theo thời gian thực các số liệu huấn luyện, giúp bạn xác định xem AI của bạn đang học hiệu quả, đã hoàn thành huấn luyện, hoặc đang gặp khó khăn trong việc tiến bộ.
+
+## Thiết Lập Bảng Điều Khiển
+
+:::caution[Yêu cầu tiên quyết]
+Đảm bảo bạn đã cài đặt .NET Web SDK trên hệ thống của mình (`Microsoft.NET.Sdk.Web`). Điều này cần thiết để chạy ứng dụng bảng điều khiển.
+:::
+
+### Lựa chọn 1: Clone Toàn Bộ Repository
+
+Nếu bạn muốn có toàn bộ mã nguồn RLMatrix:
+
+```bash title="Clone toàn bộ repository RLMatrix"
+git clone https://github.com/asieradzk/RL_Matrix.git
+```
+
+### Lựa chọn 2: Chỉ Lấy Bảng Điều Khiển
+
+Nếu bạn chỉ cần thành phần bảng điều khiển:
+
+```bash title="Clone chỉ phần dashboard sử dụng Git sparse-checkout"
+git clone --filter=blob:none --sparse https://github.com/asieradzk/RL_Matrix.git
+cd RL_Matrix
+git sparse-checkout set src/RLMatrix.Dashboard
+```
+
+## Chạy Bảng Điều Khiển
+
+Sau khi đã có mã của bảng điều khiển, bạn có thể:
+
+1. Mở dự án trong trình soạn thảo ưa thích (như Visual Studio hoặc VS Code)
+2. Build và chạy dự án
+
+Hoặc, bạn có thể build tệp nhị phân và chạy trực tiếp.
+
+Vì đây là một ứng dụng Blazor Server, bạn sẽ thấy cửa sổ console với đầu ra tương tự như:
+
+```bash title="Đầu ra Console Dashboard"
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: https://localhost:7126
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: http://localhost:5069
+info: Microsoft.Hosting.Lifetime[0]
+Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+Content root path: D:\path\to\your\dashboard\RLMatrix.Dashboard
+```
+
+Nếu cửa sổ trình duyệt không tự động mở, hãy điều hướng đến [https://localhost:7126](https://localhost:7126) trong trình duyệt của bạn.
+
+:::tip
+Khi bạn mở bảng điều khiển lần đầu tiên, dropdown thí nghiệm ở góc trên bên trái sẽ trống. Điều này bình thường - nó sẽ được điền sau khi bắt đầu huấn luyện.
+:::
+
+## Kết Nối Dự Án Của Bạn Với Bảng Điều Khiển
+
+Hãy xem lại ví dụ nhận dạng mẫu từ hướng dẫn [Bắt Đầu](/beginner/gettingstarted/). Khi bạn chạy mã huấn luyện của mình, bạn sẽ thấy thông báo trong console:
+
+```
+Connected to dashboard
+```
+
+Nếu bạn không thấy thông báo này, có điều gì đó không ổn với kết nối. Hãy kiểm tra lại rằng:
+1. Bảng điều khiển đang chạy
+2. Mã huấn luyện của bạn có cài đặt kết nối chính xác
+3. Không có tường lửa nào đang chặn kết nối
+
+## Hiểu Dữ Liệu Bảng Điều Khiển
+
+Sau khi bắt đầu huấn luyện, hãy làm mới trang bảng điều khiển. Bây giờ bạn sẽ thấy tên thí nghiệm của mình trong menu dropdown ở góc trên bên trái. Chọn nó để xem số liệu huấn luyện của bạn:
+
+![Bảng Điều Khiển RLMatrix](/images/dashboard/dashboard.png)
+
+Bảng điều khiển hiển thị nhiều số liệu quan trọng:
+
+### Phần Thưởng Theo Thời Gian
+Biểu đồ này hiển thị phần thưởng nhận được cho mỗi tập. Đối với ví dụ nhận dạng mẫu của chúng ta, bạn sẽ thấy nó trao -1 ít thường xuyên hơn khi AI học mẫu chính xác.
+
+### Phần Thưởng Tích Lũy Theo Thời Gian
+Biểu đồ này hiển thị tổng phần thưởng theo thời gian. **Sự thay đổi độ dốc của biểu đồ này đặc biệt quan trọng** - độ dốc trở nên dốc hơn khi AI của bạn học cách tối đa hóa phần thưởng.
+
+:::note[Điều Cần Tìm Kiếm]
+Độ dốc tăng đều trong biểu đồ phần thưởng tích lũy là một trong những chỉ báo tốt nhất cho thấy mô hình của bạn đang cải thiện.
+Độ dốc không đổi có thể có nghĩa là mô hình đang bị kẹt và cần kích thích khám phá cao hơn.
+:::
+
+### Độ Dài Tập Theo Thời Gian
+Điều này theo dõi mỗi tập kéo dài bao nhiêu bước. Trong ví dụ nhận dạng mẫu đơn giản của chúng ta, con số này luôn là 1 vì chúng ta thực hiện một bước cho mỗi tập. Trong môi trường phức tạp hơn (như Cart-Pole), số liệu này có thể cho thấy nếu tác nhân của bạn đang tồn tại lâu hơn theo thời gian.
+
+### Độ Mất Mát Theo Thời Gian
+Biểu đồ này hiển thị giá trị hàm mất mát của mạng nơ-ron. **Hãy tìm kiếm xu hướng giảm dần nói chung** - điều này cho thấy mô hình của bạn đang khớp với dữ liệu tốt hơn.
+
+### Tốc Độ Học Tập Theo Thời Gian
+Biểu đồ này hiển thị sự thay đổi trong tốc độ học tập của mạng nơ-ron. Theo mặc định, RLMatrix sử dụng một bộ lập lịch gây ra dao động nhỏ trong quá trình huấn luyện.
+
+## Cập Nhật Thời Gian Thực
+
+Một trong những tính năng mạnh mẽ nhất của bảng điều khiển là khả năng cập nhật theo thời gian thực. Khi quá trình huấn luyện của bạn tiến triển, bảng điều khiển sẽ tự động cập nhật để phản ánh các số liệu mới nhất.
+
+Trong ví dụ nhận dạng mẫu của chúng ta, bạn có thể nhấn Enter trong cửa sổ console để tiếp tục huấn luyện và xem bảng điều khiển cập nhật theo thời gian thực.
+
+## Xuất Dữ Liệu Huấn Luyện
+
+Để phân tích thêm hoặc lưu trữ, bạn có thể xuất dữ liệu huấn luyện của mình bằng cách nhấp vào nút "Export as CSV" ở góc trên bên phải của bảng điều khiển.
+
+Điều này cho phép bạn:
+- Thực hiện phân tích tùy chỉnh trong Excel hoặc các công cụ khác
+- So sánh các lần huấn luyện khác nhau
+- Chia sẻ kết quả với đồng nghiệp
+
+## Bước Tiếp Theo
+
+Bây giờ bạn đã hiểu cách theo dõi quá trình huấn luyện với bảng điều khiển, bạn đã sẵn sàng để khám phá môi trường và không gian hành động phức tạp hơn.
+
+<LinkCard
+    title="Làm Việc Với Hành Động Liên Tục"
+    description="Tìm hiểu cách huấn luyện tác nhân với không gian hành động liên tục cho các bài toán điều khiển thực tế hơn."
+    href="/beginner/continuousactions/"
+/>

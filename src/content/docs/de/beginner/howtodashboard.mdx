@@ -1,0 +1,131 @@
+---
+title: Verwendung des Dashboards
+description: Lernen Sie, wie Sie das RLMatrix Dashboard verwenden, um Ihren Trainingsfortschritt in Echtzeit zu überwachen.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+
+Im Anschluss an unseren [Erste Schritte](/beginner/gettingstarted/) Leitfaden fragen Sie sich vielleicht, wie Sie den Trainingsfortschritt Ihrer KI überwachen können. Während die Ausgabe in der Konsole für einfache Beispiele funktioniert, erfordern Projekte in der realen Welt oft eine anspruchsvollere Überwachung.
+
+Das RLMatrix Dashboard bietet Echtzeit-Visualisierung von Trainingsmetriken und hilft Ihnen festzustellen, ob Ihre KI effektiv lernt, das Training abgeschlossen hat oder keine Fortschritte macht.
+
+## Einrichtung des Dashboards
+
+:::caution[Voraussetzungen]
+Stellen Sie sicher, dass das .NET Web SDK auf Ihrem System installiert ist (`Microsoft.NET.Sdk.Web`). Dies ist erforderlich, um die Dashboard-Anwendung auszuführen.
+:::
+
+### Option 1: Klonen des vollständigen Repositories
+
+Wenn Sie den vollständigen RLMatrix-Quellcode wünschen:
+
+```bash title="Klonen des vollständigen RLMatrix-Repositories"
+git clone https://github.com/asieradzk/RL_Matrix.git
+```
+
+### Option 2: Nur das Dashboard erhalten
+
+Wenn Sie nur die Dashboard-Komponente benötigen:
+
+```bash title="Klonen Sie nur das Dashboard mit Git sparse-checkout"
+git clone --filter=blob:none --sparse https://github.com/asieradzk/RL_Matrix.git
+cd RL_Matrix
+git sparse-checkout set src/RLMatrix.Dashboard
+```
+
+## Ausführen des Dashboards
+
+Sobald Sie den Dashboard-Code haben, können Sie:
+
+1. Das Projekt in Ihrem bevorzugten Editor öffnen (wie Visual Studio oder VS Code)
+2. Das Projekt bauen und ausführen
+
+Alternativ können Sie die Binärdatei erstellen und diese direkt ausführen.
+
+Da es sich um eine Blazor Server-Anwendung handelt, sehen Sie ein Konsolenfenster mit einer Ausgabe ähnlich zu:
+
+```bash title="Dashboard-Konsolenausgabe"
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: https://localhost:7126
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: http://localhost:5069
+info: Microsoft.Hosting.Lifetime[0]
+Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+Content root path: D:\path\to\your\dashboard\RLMatrix.Dashboard
+```
+
+Wenn sich nicht automatisch ein Browserfenster öffnet, navigieren Sie in Ihrem Browser zu [https://localhost:7126](https://localhost:7126).
+
+:::tip
+Wenn Sie das Dashboard zum ersten Mal öffnen, wird das Experiment-Dropdown in der oberen linken Ecke leer sein. Das ist normal - es wird gefüllt, sobald das Training beginnt.
+:::
+
+## Verbinden Ihres Projekts mit dem Dashboard
+
+Lassen Sie uns unser Musterabgleich-Beispiel aus dem [Erste Schritte](/beginner/gettingstarted/) Leitfaden noch einmal betrachten. Wenn Sie Ihren Trainingscode ausführen, sollten Sie eine Meldung in der Konsole sehen:
+
+```
+Connected to dashboard
+```
+
+Wenn Sie diese Meldung nicht sehen, ist etwas mit der Verbindung schief gelaufen. Überprüfen Sie, dass:
+1. Das Dashboard läuft
+2. Ihr Trainingscode die richtigen Verbindungseinstellungen hat
+3. Keine Firewall die Verbindung blockiert
+
+## Interpretation der Dashboard-Daten
+
+Nach dem Start Ihres Trainings aktualisieren Sie die Dashboard-Seite. Sie sollten jetzt Ihren Experimentnamen im Dropdown-Menü oben links sehen. Wählen Sie ihn aus, um Ihre Trainingsmetriken anzuzeigen:
+
+![RLMatrix Dashboard](/images/dashboard/dashboard.png)
+
+Das Dashboard zeigt mehrere wichtige Metriken an:
+
+### Belohnung über Zeit
+Dieser Graph zeigt die erhaltene Belohnung pro Episode. Für unser Musterabgleich-Beispiel sollten Sie sehen, dass es weniger häufig -1 vergibt, wenn die KI das richtige Muster lernt.
+
+### Kumulative Belohnung über Zeit
+Dies zeigt die Summe der Belohnungen im Zeitverlauf. **Die Änderung der Steigung dieses Graphen ist besonders wichtig** - die Steigung wird steiler, wenn Ihre KI lernt, Belohnungen zu maximieren.
+
+:::note[Worauf zu achten ist]
+Eine stetig zunehmende Steigung im Graphen der kumulativen Belohnung ist einer der besten Indikatoren dafür, dass sich Ihr Modell verbessert.
+Konstante Steigung könnte bedeuten, dass das Modell feststeckt und höhere Explorationsanreize benötigt.
+:::
+
+### Episodenlänge über Zeit
+Dies verfolgt, wie viele Schritte jede Episode dauert. In unserem einfachen Musterabgleich-Beispiel wird dies immer 1 sein, da wir einen Schritt pro Episode machen. In komplexeren Umgebungen (wie Cart-Pole) kann diese Metrik zeigen, ob Ihr Agent mit der Zeit länger überlebt.
+
+### Verlust über Zeit
+Dies zeigt den Wert der Verlustfunktion des neuronalen Netzwerks. **Achten Sie auf einen allgemein abnehmenden Trend** - dies zeigt an, dass Ihr Modell die Daten besser anpasst.
+
+### Lernrate über Zeit
+Dies zeigt Änderungen in der Lernrate des neuronalen Netzwerks. Standardmäßig verwendet RLMatrix einen Scheduler, der während des Trainings kleine Schwankungen verursacht.
+
+## Echtzeit-Updates
+
+Eine der leistungsstärksten Funktionen des Dashboards ist sein Echtzeit-Update. Während Ihr Training fortschreitet, aktualisiert sich das Dashboard automatisch, um die neuesten Metriken widerzuspiegeln.
+
+In unserem Musterabgleich-Beispiel können Sie in Ihrem Konsolenfenster Enter drücken, um das Training fortzusetzen und das Dashboard in Echtzeit zu aktualisieren.
+
+## Exportieren von Trainingsdaten
+
+Für weitere Analysen oder zur Aufzeichnung können Sie Ihre Trainingsdaten exportieren, indem Sie auf die Schaltfläche "Export as CSV" in der oberen rechten Ecke des Dashboards klicken.
+
+Dies ermöglicht Ihnen:
+- Benutzerdefinierte Analysen in Excel oder anderen Tools durchzuführen
+- Verschiedene Trainingsläufe zu vergleichen
+- Ergebnisse mit Kollegen zu teilen
+
+## Nächste Schritte
+
+Jetzt, da Sie verstehen, wie Sie Ihr Training mit dem Dashboard überwachen können, sind Sie bereit, komplexere Umgebungen und Aktionsräume zu erkunden.
+
+<LinkCard
+    title="Arbeiten mit kontinuierlichen Aktionen"
+    description="Lernen Sie, wie Sie Agenten mit kontinuierlichen Aktionsräumen für realistischere Steuerungsprobleme trainieren."
+    href="/beginner/continuousactions/"
+/>

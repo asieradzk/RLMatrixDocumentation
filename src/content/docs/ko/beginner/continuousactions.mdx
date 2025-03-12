@@ -1,0 +1,421 @@
+---
+title: 연속적인 행동 다루기
+description: RLMatrix와 강화학습에서의 연속적인 행동 소개.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+import Quiz from '@/components/Quiz.astro';
+
+[이전 튜토리얼](/beginner/gettingstarted/)의 프로젝트로 시작하여 연속적인 행동을 추가해 봅시다. [시작 프로젝트](https://github.com/asieradzk/RLMatrixGettingStartedExample1)를 따라하거나, 원하신다면 [완성된 프로젝트](https://github.com/asieradzk/RLMatrixGettingStartedExample2_ContinuousActions)를 확인하세요.
+
+## 이산 vs. 연속 행동
+
+이전 가이드에서는 이산적인 행동을 다루었습니다 - 우리의 에이전트는 패턴과 일치시키기 위해 유한한 옵션 세트(0 또는 1) 중에서 선택해야 했습니다. 실제 시나리오에서는 어떤 버튼을 누를지 결정하기 위해 다양한 센서 데이터와 시각적 입력을 받을 수 있습니다.
+
+:::tip[프로젝트의 미래 보장]
+결정을 유한한 수의 버튼 누름(이산적 행동)으로 단순화할 수 있도록 행동 공간을 이산화할 수 있다면, 그렇게 하세요! 이는 학습 신호를 훨씬 더 가시적으로 만들고 훈련을 크게 가속화합니다. 이 튜토리얼에서 직접 목격하게 될 것입니다.
+:::
+
+그러나 많은 실제 응용 프로그램에서 이것이 항상 가능한 것은 아닙니다. 다음과 같은 것들을 제어하기 위해:
+- 차량의 조향 각도
+- 로봇 팔의 관절 토크
+- 엔진의 전력 수준
+
+우리의 에이전트는 범주형 선택이 아닌 정확한 부동 소수점 값인 연속적인 행동을 출력해야 합니다.
+
+## 환경에 연속적인 행동 추가하기
+
+우리의 환경을 수정하여 이산적 행동과 연속적 행동을 모두 포함하도록 합시다. 원래의 패턴 일치 작업을 유지하되, AI가 이 새로운 값의 제곱근을 출력하기를 기대하는 두 번째 패턴을 추가할 것입니다.
+
+우리의 기대치 외에는 아무것도 변경하지 않는다는 점에 주목하세요—에이전트는 오직 보상 신호에 의해 안내되어 시행착오를 통해 우리가 원하는 것을 파악해야 합니다!
+
+먼저, `PatternMatchingEnvironment.cs`에 두 번째 패턴과 연속적 행동을 추적하기 위한 새 필드를 추가합니다:
+
+```csharp title="PatternMatchingEnvironment.cs" ins="private int pattern2 = 0;" ins="private float aicontinuousChoice = 0f;"
+private int pattern = 0;
+private int pattern2 = 0;
+private int aiChoice = 0;
+private float aicontinuousChoice = 0f;
+private bool roundFinished = false;
+```
+
+다음으로, 두 번째 관찰 메서드와 연속적 행동 메서드를 추가합니다:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixObservation]
+public float SeePattern() => pattern;
+
+[RLMatrixObservation]
+public float SeePattern2() => pattern2;
+
+[RLMatrixActionContinuous]
+public void MakeChoiceContinuous(float input)
+{
+    aicontinuousChoice = input;
+}
+```
+
+이제 보상 함수를 생성해 봅시다:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float GiveReward() => aiChoice == pattern ? 1.0f : -1.0f;
+
+// AI의 연속적 출력이 두 번째 패턴의 제곱근에 가까울 때 +2 보상 추가
+[RLMatrixReward]
+public float ExtraRewards() => Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2)) < 0.1f ? 2f : 0.0f;
+```
+
+마지막으로, 두 패턴을 모두 생성하도록 `StartNewRound` 메서드를 업데이트해야 합니다:
+
+```csharp title="PatternMatchingEnvironment.cs" ins="pattern2 = Random.Shared.Next(10);"
+[RLMatrixReset]
+public void StartNewRound()
+{
+    pattern = Random.Shared.Next(2);
+    pattern2 = Random.Shared.Next(10);
+    aiChoice = 0;
+    roundFinished = false;
+}
+```
+
+pattern2에 0-9 범위를 사용하고 있는데, 이는 에이전트에게 다양한 제곱근을 예측하는 더 흥미로운 도전을 제공합니다.
+
+## 컴파일 오류 수정하기
+
+솔루션을 빌드하려고 하면 일련의 오류가 발생합니다. 이는 실제로 도움이 됩니다—RLMatrix는 런타임 오류를 방지하고 연속적 행동에 대한 올바른 구현으로 안내하기 위해 강력한 타입 지정을 사용합니다.
+
+### 오류 1: 환경 타입 불일치
+
+```
+Argument 1: cannot convert from 'PatternMatchingExample.PatternMatchingEnvironment' to 'RLMatrix.IEnvironmentAsync<float[]>'
+```
+
+이것은 RLMatrix가 타입 안전성을 보장하기 위해 연속적 환경과 이산적 환경에 대해 서로 다른 인터페이스를 가지기 때문에 발생합니다. `Program.cs`에서 코드를 업데이트합시다:
+
+```diff lang="csharp" title="Program.cs - 환경 타입"
+-var env = new List<IEnvironmentAsync<float[]>> {
++var env = new List<IContinuousEnvironmentAsync<float[]>> {
+    environment,
+    //new PatternMatchingEnvironment().RLInit() //you can add more than one to train in parallel
+};
+```
+
+### 오류 2: 에이전트 타입 불일치
+
+이 변경 후, 두 번째 오류가 발생합니다:
+
+```
+Argument 2: cannot convert from 'System.Collections.Generic.List<RLMatrix.IContinuousEnvironmentAsync<float[]>>' to 'System.Collections.Generic.IEnumerable<RLMatrix.IEnvironmentAsync<float[]>>'
+```
+
+이는 연속적인 환경에서 이산적인 에이전트를 사용하려고 하기 때문입니다. 에이전트 타입을 변경해야 합니다:
+
+```diff lang="csharp" title="Program.cs - 에이전트 타입"
+-var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
++var agent = new LocalContinuousRolloutAgent<float[]>(learningSetup, env);
+```
+
+### 오류 3: 알고리즘 옵션 불일치
+
+이로 인해 세 번째 오류가 발생합니다:
+
+```
+Argument 1: cannot convert from 'RLMatrix.DQNAgentOptions' to 'RLMatrix.PPOAgentOptions'
+```
+
+이 마지막 오류는 DQN이 연속적인 행동과 호환되지 않음을 보여줍니다. 이산적 행동 공간과 연속적 행동 공간을 모두 처리할 수 있는 PPO(Proximal Policy Optimization)로 전환해야 합니다:
+
+```diff lang="csharp" title="Program.cs - 알고리즘 옵션"
+-var learningSetup = new DQNAgentOptions(
+-    batchSize: 32,      
+-    memorySize: 1000,   
+-    gamma: 0.99f,      
+-    epsStart: 1f,     
+-    epsEnd: 0.05f,      
+-    epsDecay: 150f      
+-);
++var learningSetup = new PPOAgentOptions(
++    batchSize: 128,
++    memorySize: 1000,
++    gamma: 0.99f,
++    width: 128,
++    lr: 1E-03f
++);
+```
+
+:::note[DQN vs PPO]
+DQN은 특별히 이산적 행동 공간을 위해 설계되었으며 연속적인 출력을 처리하는 메커니즘이 없습니다. 반면에 PPO는 이산적 행동, 연속적 행동, 또는 둘 다를 동시에 처리할 수 있는 액터-크리틱 알고리즘입니다.
+
+각 알고리즘은 자체 강점을 가지고 있습니다—DQN은 이산적 문제에 대해 매우 샘플 효율적일 수 있으며, PPO는 종종 복잡한 환경을 더 강력하게 처리합니다. RLMatrix는 둘 다 제공하므로 특정 요구에 따라 선택할 수 있습니다.
+:::
+
+
+
+## 첫 번째 훈련 실행
+
+이제 훈련을 실행하고 어떤 일이 발생하는지 봅시다:
+
+```bash title="훈련 출력"
+Step 800/1000 - Last 50 steps accuracy: 42.0%
+Press Enter to continue...
+
+Step 850/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 37.0%
+Press Enter to continue...
+```
+
+놀랍게도! AI는 거의 학습하지 못하고 있습니다. 정확도가 50%를 넘지 못하며, 대시보드를 확인해보면 이산적 행동(패턴 일치)에 대해 +1 보상을 정기적으로 수집하지만 연속적 행동(√pattern2 예측)에 대한 +2 보상은 거의 얻지 못하는 것을 볼 수 있습니다.
+
+## 왜 이런 일이 발생하나요?
+
+자문해 보세요: 왜 AI는 연속적인 행동보다 이산적인 행동을 훨씬 더 쉽게 배울까요?
+
+첫 번째 직감은 학습률(`lr`)일 수 있습니다—너무 낮은 것일까요? `1E-02f`로 변경하고 훈련을 다시 실행해 봅시다...
+
+도움이 되었나요? 아마도 그렇지 않을 것입니다. 사실, 에이전트가 이산적 행동을 더 빨리 배우는 동안 연속적인 행동 공간을 거의 탐색하지 않으며, 훈련이 진행됨에 따라 정확도가 더 나빠지는 것을 알 수 있습니다.
+
+그렇다면 실제로 무슨 일이 일어나고 있을까요?
+
+:::caution[근본적인 도전]
+AI가 무작위 탐색을 통해 연속적인 행동을 정확히 맞출 가능성은 매우 작습니다.
+
+생각해 보세요:
+- 이산적인 선택(0 또는 1)으로는 무작위 추측이 50%의 정확도를 제공합니다
+- 연속적인 값으로는 무작위로 다음을 출력할 확률이 얼마나 될까요:
+- pattern2 = 0일 때 √0 = 0
+- pattern2 = 1일 때 √1 = 1
+- pattern2 = 2일 때 √2 ≈ 1.414
+- pattern2 = 3일 때 √3 ≈ 1.732
+- ...그리고 계속해서 √9 = 3까지
+
+이것은 희소 보상 문제를 만듭니다—에이전트가 우연히 올바른 행동을 하는 경우가 드물어 학습에 유용한 피드백을 거의 받지 못합니다.
+:::
+
+## 안내 신호 추가하기
+
+더 유용한 보상 신호를 제공하여 이 문제를 해결해 봅시다. 정확한 일치만 보상하는 대신, 에이전트가 올바른 제곱근에 가까워질수록 증가하는 보상을 추가할 것입니다:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float ExtraSupportingReward() => 0.5f / (1 + Math.Abs(aicontinuousChoice - (float)Math.Sqrt(pattern2)));
+
+//학습률을 다시 1E-03f로 설정하는 것을 잊지 마세요!
+```
+
+이 보상 함수는 그라디언트를 생성합니다—에이전트가 올바른 값에 접근할수록 더 강해지는 연속적인 신호입니다. 정확히 맞지 않더라도, "더 따뜻해지고" 있는지 아니면 "더 차가워지고" 있는지에 대한 피드백을 얻습니다.
+
+:::tip[보상 엔지니어링]
+이것은 강화학습에서 **보상 형성(reward shaping)**이라는 중요한 원칙을 보여줍니다:
+
+- **희소 보상**(전부 아니면 전무) 방식은 연속적인 공간에서 학습을 거의 불가능하게 만듭니다
+- **밀집/형성된 보상**은 학습 과정을 안내하는 그라디언트를 만듭니다
+- "더 따뜻해지고 있다"는 작은 신호조차도 몇 시간 내에 학습하는 것과 전혀 학습하지 못하는 것의 차이를 만들 수 있습니다
+
+이것은 마치 눈을 가린 사람이 방을 가로질러 길을 찾도록 돕는 것과 같습니다:
+- 희소 보상: "문에 도달했습니다" (그 외에는 침묵)
+- 형성된 보상: "따뜻해요... 더 따뜻해요... 차가워요... 다시 따뜻해요..."
+
+두 번째 접근 방식은 훨씬 더 안정적으로 성공으로 이어집니다. 이는 에이전트가 정확한 값을 발견해야 하는 연속적인 제어 문제에서 특히 중요합니다.
+:::
+
+이 변경 사항으로 훈련을 다시 실행하고 어떤 일이 발생하는지 봅시다:
+
+```bash title="훈련 출력"
+Step 850/1000 - Last 50 steps accuracy: 35.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 47.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 36.0%
+Press Enter to continue...
+```
+
+약간의 개선이 보이지만, 여전히 좋지 않습니다. 대시보드에는 학습이 진행되고 있다는 힌트가 표시될 수 있지만, 분명히 이 더 복잡한 작업에는 더 많은 훈련 시간이 필요합니다.
+
+## 훈련 시간 연장하기
+
+연속적인 행동 예측과 같은 더 복잡한 도전에는 종종 더 많은 훈련 단계가 필요합니다. 프로그램을 수정하여 1,000 단계 대신 10,000 단계 동안 훈련해 봅시다:
+
+```csharp title="Program.cs" {1,5}
+for (int i = 0; i < 10000; i++)
+{
+    await agent.Step();
+
+    if ((i + 1) % 500 == 0)
+    {
+        Console.WriteLine($"Step {i + 1}/10000 - Last 500 steps accuracy: {environment.RecentAccuracy:F1}%");
+        environment.ResetStats();
+        
+        Console.WriteLine("\nPress Enter to continue...");
+        Console.ReadLine();
+    }
+}
+```
+
+## 실험: 학습률의 영향
+
+더 긴 훈련 진행 상황을 지켜보면서, 다양한 학습률로 실험해 보세요. 더 낮추면 어떻게 될까요? 크게 올리면 어떻게 될까요?
+
+제 실험에서는 학습률을 매우 높게 설정하면 모델이 이산적 행동에 대한 +1 보상만 수집하는 데 고착되고 연속적인 공간을 충분히 탐색하지 못하게 됩니다.
+
+:::tip[학습률 인사이트]
+특히 PPO에서는 학습률을 높이는 것이 탐색에 항상 더 좋은 것은 아닙니다:
+
+- **너무 높을 때**: 에이전트는 처음 발견한 전략에 빠르게 고착되어, 종종 발견하기 더 어려운 연속적인 행동 패턴을 무시합니다
+- **너무 낮을 때**: 학습이 매우 느리게 진행되지만, 더 철저히 탐색합니다
+- **적절할 때**: 작업에 맞게 탐색과 활용의 균형을 적절히 맞춥니다
+
+학습률과 탐색 품질 사이의 이러한 반직관적인 관계는 연속적인 행동 공간을 다룰 때 특히 중요합니다.
+:::
+
+## 핵심 요점
+
+이 연습을 통해 우리는 몇 가지 중요한 교훈을 배웠습니다:
+
+1. **연속적인 행동은 이산적인 행동보다 본질적으로 배우기 어렵습니다**. 희소 보상 문제 때문입니다. 가능하다면 행동 공간을 이산화하세요!
+
+2. **보상 엔지니어링은 연속적인 제어 문제에서 엄청나게 중요합니다**. "더 따뜻해지고 있다"는 신호를 제공하면 불가능한 학습 작업이 다룰 수 있는 것으로 변합니다.
+
+3. **복잡한 작업에는 더 많은 훈련 시간이 필요합니다**. 행동 공간에 차원을 추가함에 따라 훈련 기간을 적절히 확장해야 합니다.
+
+4. **알고리즘 선택이 중요합니다**. DQN은 연속적인 행동을 전혀 처리할 수 없는 반면, PPO는 이산적, 연속적 또는 혼합 행동 공간을 처리할 수 있습니다.
+
+5. **학습률 조정은 섬세합니다**, 특히 PPO에서는. 더 높은 것이 항상 더 좋은 것은 아니며 때로는 탐색에 더 안 좋을 수 있습니다.
+
+이러한 원칙들은 RLMatrix로 더 복잡한 강화학습 도전을 해결할 때 도움이 될 것입니다.
+
+## 이해도 테스트
+
+<Quiz
+    title="연속적인 행동 이해하기"
+    questions={[
+        {
+            question: "에이전트가 이산적인 행동에 비해 연속적인 행동을 배우기가 훨씬 더 어려운 이유는 무엇인가요?",
+            options: [
+                {
+                    text: "연속적인 행동은 신경망 계산의 복잡성으로 인해 더 많은 계산 리소스가 필요합니다",
+                    correct: false,
+                    explanation: "연속적인 행동 공간이 더 복잡한 신경망을 필요로 할 수 있지만, 이것이 학습 어려움의 근본적인 이유는 아닙니다. 핵심 도전은 강화학습에서의 탐색-활용 문제에 훨씬 더 근본적입니다."
+                },
+                {
+                    text: "올바른 연속값을 무작위로 탐색할 확률은 작은 이산적 옵션 세트에서 선택하는 것에 비해 무한히 작습니다",
+                    correct: true,
+                    explanation: "정확합니다! 이것이 바로 희소 보상 문제입니다. 무작위로 탐색할 때, 에이전트는 이진 선택을 올바르게 할 확률이 약 50%이지만, 모든 가능한 부동 소수점 값 중에서 정확히 √2 ≈ 1.414...를 찾는 것은 순전히 우연으로는 거의 불가능합니다. 이로 인해 적절한 보상 형성 없이는 초기 학습 신호가 매우 드물게 됩니다."
+                },
+                {
+                    text: "PPO 알고리즘은 모든 유형의 학습 작업에서 DQN 알고리즘보다 본질적으로 덜 효율적입니다",
+                    correct: false,
+                    explanation: "이것은 정확하지 않습니다. PPO와 DQN은 서로 다른 강점을 가지고 있습니다 - DQN은 이산적인 문제에 대해 더 샘플 효율적일 수 있는 반면, PPO는 더 다재다능하고 DQN이 근본적으로 처리할 수 없는 연속적인 행동 공간을 처리할 수 있습니다. 둘 중 어느 것도 보편적으로 더 좋지는 않습니다."
+                }
+            ],
+            hint: "에이전트가 훈련 초기에 무작위로 탐색할 때 어떤 일이 일어나는지 생각해 보세요. 각 경우에 올바른 행동을 찾을 확률은 얼마나 될까요?"
+        },
+        {
+            question: "어떤 핵심 기술이 우리의 연속적인 행동 학습 문제를 거의 불가능한 것에서 다룰 수 있는 것으로 변화시켰나요?",
+            options: [
+                {
+                    text: "훈련 단계 수를 1,000에서 10,000으로 증가시키기",
+                    correct: false,
+                    explanation: "더 많은 훈련 시간이 중요하지만, 그것만으로는 근본적인 희소 보상 문제를 해결할 수 없습니다. 우리가 만든 더 중요한 변화 없이는 에이전트가 여전히 학습에 어려움을 겪을 것입니다."
+                },
+                {
+                    text: "DQN에서 PPO 알고리즘으로 변경하기",
+                    correct: false,
+                    explanation: "이 변화는 필요했습니다(DQN은 연속적인 행동을 전혀 처리할 수 없기 때문에), 하지만 충분하지는 않았습니다. PPO를 사용하더라도 에이전트는 처음에 희소 보상 신호로 인해 어려움을 겪었습니다."
+                },
+                {
+                    text: "에이전트가 올바른 값에 얼마나 가까운지에 기반한 피드백을 제공하는 형성된 보상 함수 추가하기",
+                    correct: true,
+                    explanation: "정확합니다! 이것이 바로 보상 형성입니다. 0.5f / (1 + Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2)))를 반환하는 ExtraSupportingReward 함수를 추가함으로써, 에이전트가 정확히 맞지 않더라도 유용한 학습 신호를 제공하는 그라디언트를 만들었습니다. 이는 정확한 목표를 찾을 때까지 침묵하는 대신 '따뜻해요/차가워요' 피드백을 제공하는 것과 같습니다."
+                }
+            ],
+            hint: "연속적인 행동 공간에서의 희소 보상이라는 근본적인 도전을 해결한 변화가 무엇인지 생각해 보세요."
+        },
+        {
+            question: "연속적인 행동 작업에서 PPO의 학습률에 관해 어떤 반직관적인 관계를 관찰했나요?",
+            options: [
+                {
+                    text: "더 높은 학습률은 에이전트가 연속적인 행동을 무시하면서 더 쉬운 이산적 보상에만 집중하게 했습니다",
+                    correct: true,
+                    explanation: "맞습니다! 매우 높은 학습률에서는 에이전트가 이산적 행동 패턴(+1 보상)을 빠르게 학습한 다음 그것에 고착되어, 발견하기 더 어렵지만 +2 보상을 제공하는 연속적인 행동 공간을 효과적으로 무시하는 것을 관찰했습니다. 이는 학습률이 탐색/활용 균형에 어떻게 영향을 미치는지 보여줍니다."
+                },
+                {
+                    text: "더 낮은 학습률은 항상 최적 정책으로 더 빠르게 수렴했습니다",
+                    correct: false,
+                    explanation: "이것은 우리가 관찰한 것과 반대입니다. 더 낮은 학습률은 실제로 전체적으로 더 느린 학습으로 이어졌지만 때로는 연속적인 행동 공간을 더 잘 탐색했습니다. 균형을 유지하는 것이 중요합니다."
+                },
+                {
+                    text: "학습률은 훈련 결과에 의미 있는 영향을 미치지 않았습니다",
+                    correct: false,
+                    explanation: "학습률은 훈련 결과에 상당한 영향을 미쳤습니다. 학습 속도뿐만 아니라 더 중요하게는 탐색-활용 균형에 영향을 미쳤으며, 특히 에이전트가 더 쉬운 이산적 보상을 발견하기 더 어려운 연속적인 행동 패턴에 비해 어떻게 우선시하는지에 관련해서요."
+                }
+            ],
+            hint: "서로 다른 학습률로 실험했을 때 어떤 일이 일어났는지, 그리고 그것이 에이전트가 두 가지 유형의 보상을 모두 발견하는 능력에 어떤 영향을 미쳤는지 회상해 보세요."
+        },
+        {
+            question: "이 수업에 기반하여, 어떤 버튼(4개 버튼 중)을 누를지와 얼마나 많은 압력을 가할지(0-100%)를 결정해야 하는 로봇 제어 시스템을 설계한다면, 어떤 접근 방식이 가장 효과적일까요?",
+            options: [
+                {
+                    text: "효율성을 위해 DQN을 사용하고, 압력을 10개 수준(0%, 10%, 20% 등)으로 이산화하기",
+                    correct: true,
+                    explanation: "훌륭한 선택입니다! 이는 튜토리얼의 핵심 원칙을 따릅니다: '행동 공간을 이산화할 수 있다면, 그렇게 하세요!' 압력을 10개의 이산 수준으로 변환함으로써, 어려운 연속적인 문제를 총 40개의 행동(4개 버튼 × 10개 압력 수준)만 있는 관리 가능한 이산적인 문제로 변환했습니다. DQN은 연속값으로 고생하는 것보다 이 이산화된 공간을 훨씬 더 효율적으로 학습할 것입니다."
+                },
+                {
+                    text: "기본 설정으로 PPO를 사용하고 두 측면을 동시에 파악하도록 하기",
+                    correct: false,
+                    explanation: "PPO가 혼합 행동 공간을 처리할 수 있지만, 기본 설정으로 사용하는 것은 최적이 아닌 학습으로 이어질 가능성이 높습니다. 이 수업에서 우리는 연속적인 행동이 무작위 탐색을 통해 본질적으로 배우기 어렵다는 것을 알았습니다. 이산화나 신중한 보상 형성 없이는 학습이 비효율적일 것입니다."
+                },
+                {
+                    text: "압력 정확도에 대한 그라디언트 피드백을 제공하는 형성된 보상과 함께 PPO를 사용하고, 압력을 진정한 연속값으로 취급하기",
+                    correct: false,
+                    explanation: "이 접근 방식이 결국 작동할 수 있지만, 가능한 경우 행동을 이산화하면 더 빠르고 더 신뢰할 수 있는 학습으로 이어진다는 튜토리얼의 핵심 통찰을 무시합니다. 압력을 연속값으로 취급하면 10개 수준으로 이산화하는 것이 작업에 충분할 가능성이 높은데 불필요하게 어려운 학습 문제를 만듭니다."
+                }
+            ],
+            hint: "가능할 때 행동 공간을 이산화하는 것에 대한 튜토리얼의 강력한 권장 사항을 기억하고, 어떤 접근 방식이 학습 문제를 가장 간단하게 만드는지 고려하세요."
+        },
+        {
+            question: "우리가 본 패턴에 기반하여, 강화학습 에이전트에게 가장 도전적일 가능성이 높은 시나리오는 무엇인가요?",
+            options: [
+                {
+                    text: "미로를 통과하는 세 가지 사전 정의된 경로 중 하나를 선택하는 법 배우기",
+                    correct: false,
+                    explanation: "이것은 단 세 가지 옵션만 있는 간단한 이산적 행동 문제입니다. 우리의 수업에 따르면, 옵션이 적은 이산적 행동 공간은 강화학습 에이전트가 효과적으로 탐색하기 가장 쉽습니다."
+                },
+                {
+                    text: "시스템의 온도를 정확히 37.85°C로 최소한의 변동으로 조정하는 법 배우기",
+                    correct: true,
+                    explanation: "이것이 정말 가장 도전적인 시나리오입니다! 매우 정확한 연속값(정확히 37.85°C)을 찾고 최소한의 편차로 유지하는 것을 포함합니다. 적절하게 형성된 보상 없이는 에이전트가 무작위 탐색을 통해 이 정확한 설정점을 발견하는 데 어려움을 겪을 것이며, 이는 우리가 논의한 바로 그 희소 보상 문제가 됩니다."
+                },
+                {
+                    text: "시각적 입력을 기반으로 10가지 다른 유형의 객체를 인식하고 분류하는 법 배우기",
+                    correct: false,
+                    explanation: "이것이 더 많은 이산적 옵션(10개 카테고리)을 포함하지만, 여전히 근본적으로 이산적인 분류 문제입니다. 에이전트는 올바르게 분류했는지 여부에 대한 명확한 피드백을 받기 때문에 연속적인 행동 공간의 희소 보상 도전을 피할 수 있습니다."
+                }
+            ],
+            hint: "행동 공간 탐색 측면에서 어떤 시나리오가 건초더미에서 바늘을 찾는 것과 같은지 생각해 보세요."
+        }
+    ]}
+/>
+
+## 다음 단계
+
+이제 연속적인 행동 공간의 도전과 이를 해결하는 방법을 이해했으니, 더 복잡한 관찰이 있는 고전적인 강화학습 문제를 시도할 준비가 되었습니다.
+
+<LinkCard
+    title="Cart-Pole 예제"
+    description="강화학습을 사용하여 움직이는 카트 위에서 막대를 균형 잡는 방법을 배우세요."
+    href="/beginner/cartpole/"
+/>

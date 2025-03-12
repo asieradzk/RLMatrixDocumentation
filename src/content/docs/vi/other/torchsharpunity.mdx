@@ -1,0 +1,89 @@
+---
+title: Sử Dụng TorchSharp & RLMatrix trong Unity
+description: Cách tích hợp TorchSharp và RLMatrix với Unity
+---
+:::caution[KHÔNG KHUYẾN NGHỊ]
+Nhiều người dùng, bao gồm cả tôi, đã nhận thấy hành vi kỳ lạ và khó giải thích của TorchSharp trong Unity. Hiệu suất không tốt và hành vi của bộ thu gom rác là không thể đoán trước.
+Nếu bạn dự định sử dụng RLMatrix trong ứng dụng Unity, chúng tôi khuyên bạn nên sử dụng phiên bản mạng của RLMatrix - bạn có thể chạy nó trên cùng một máy thông qua socket cục bộ và hiệu suất sẽ tốt hơn nhiều.
+Hoặc, hãy cân nhắc sử dụng Godot Engine, nó hỗ trợ .NET Core và thể hiện hiệu suất ẤN TƯỢNG với TorchSharp và RLMatrix bộ nhớ chia sẻ.
+:::
+
+
+## Vậy bạn THỰC SỰ muốn sử dụng TorchSharp trong Unity 2025?
+
+Những người đóng góp cho TorchSharp có thể giải thích điều này chi tiết hơn tôi - nhưng về cơ bản các bước cài đặt bao gồm tải xuống các tệp DLL libtorch (hơn 1GB) và cài đặt/tham chiếu chúng.
+
+Điều này được thực hiện tự động trong các phiên bản .NET Core mới hơn, nhưng vì Unity vẫn chưa chuyển sang CoreCLR, chúng ta phải thực hiện nhiều bước thủ công - bao gồm cả việc cài đặt NuGet.
+Trước đây tôi đã viết hướng dẫn về cách hiệu quả để cài đặt các gói NuGet trong Unity; hướng dẫn ngắn này chỉ mở rộng nó với việc sao chép thủ công các tệp DLL.
+
+
+1. **Tạo các thư mục cần thiết trong dự án Unity của bạn:**
+```
+Assets/Plugins/Windows/x86_64
+```
+
+2. **Cài đặt RLMatrix sử dụng NuGet**
+
+Đầu tiên, tải xuống `nuget.exe` từ [trang web NuGet](https://www.nuget.org/downloads) và lưu nó vào `C:\nuget.exe`. Nếu bạn lưu nó ở nơi khác, hãy đảm bảo cập nhật đường dẫn trong script bên dưới.
+
+Lưu script PowerShell sau đây dưới dạng `install-rlmatrix.ps1` trong thư mục gốc của dự án Unity của bạn:
+
+```powershell
+$packageName = "RLMatrix"
+$packageVersion = "0.4.0"
+$netTarget = "netstandard2.0"
+$tempDir = ".\Temp"
+$dllDir = ".\Assets\Plugins"
+$nugetPath = "C:\nuget.exe"
+if (!(Test-Path $nugetPath)) {
+    Write-Error "NuGet.exe not found at $nugetPath. Please ensure it's installed there or update the path."
+    exit 1
+}
+if (!(Test-Path $tempDir)) {
+    New-Item -ItemType "directory" -Path $tempDir
+}
+& $nugetPath install $packageName -Version $packageVersion -OutputDirectory $tempDir
+if (!(Test-Path $dllDir)) {
+    New-Item -ItemType "directory" -Path $dllDir
+}
+Get-ChildItem -Path $tempDir -Directory | ForEach-Object {
+    $packagePath = Join-Path $_.FullName "lib\$netTarget"
+    if (Test-Path $packagePath) {
+        Get-ChildItem -Path $packagePath -Filter "*.dll" | ForEach-Object {
+            $destinationPath = Join-Path $dllDir $_.Name
+            if (!(Test-Path $destinationPath)) {
+                Copy-Item -Path $_.FullName -Destination $destinationPath
+            }
+        }
+    }
+}
+Remove-Item $tempDir -Recurse -Force
+```
+
+Để biết thêm chi tiết về cách hoạt động của script này, xem: https://www.nurupo.io/posts/unityhowtonuget/
+
+3. **Chạy script PowerShell**
+
+Cách thuận tiện là nhấp chuột phải vào tệp .ps1 trong Windows Explorer và chọn "Run with PowerShell" (Chạy với PowerShell).
+
+4. **Lấy các tệp DLL gốc của TorchSharp**
+
+Sao chép tất cả các tệp DLL của TorchSharp vào `Assets/Plugins/Windows/x86_64`. Tôi đã sao chép chúng từ một dự án .NET 8.0 mà tôi có sẵn đang sử dụng TorchSharp.
+![Thiết lập DLL trong Inspector](/images/unity-torchsharp/dll-settings1.png)
+
+5. **Cấu hình thiết lập nhập DLL trong Unity**
+
+Đối với mỗi tệp DLL trong thư mục Plugins:
+- Chọn tệp DLL trong bảng Project của Unity
+- Trong Inspector, đảm bảo thiết lập khớp với những điều sau:
+- Đặt Platform thành "Windows"
+- Đặt CPU thành "x86_64"
+
+
+![Thiết lập DLL trong Inspector (tiếp)](/images/unity-torchsharp/dll-settings2.png)
+
+Xong, việc này sẽ hoạt động!
+
+:::note
+Nếu bạn biết cách ít vụng về hơn để làm việc này hoạt động, vui lòng liên hệ với tôi thông qua Discord RLMatrix hoặc GitHub.
+:::

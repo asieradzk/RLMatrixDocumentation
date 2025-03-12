@@ -1,0 +1,131 @@
+---
+title: 대시보드 사용 방법
+description: RLMatrix 대시보드를 사용하여 훈련 진행 상황을 실시간으로 모니터링하는 방법을 알아보세요.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+
+[시작하기](/beginner/gettingstarted/) 가이드에 이어서, AI의 훈련 진행 상황을 어떻게 모니터링할지 궁금할 수 있습니다. 콘솔에 출력하는 것은 간단한 예제에서는 효과적이지만, 실제 프로젝트에서는 종종 더 정교한 모니터링이 필요합니다.
+
+RLMatrix 대시보드는 훈련 지표의 실시간 시각화를 제공하여 AI가 효과적으로 학습하고 있는지, 훈련이 완료되었는지, 또는 진전이 없는지 판단하는 데 도움을 줍니다.
+
+## 대시보드 설정하기
+
+:::caution[사전 요구 사항]
+시스템에 .NET Web SDK(`Microsoft.NET.Sdk.Web`)가 설치되어 있는지 확인하세요. 이는 대시보드 애플리케이션을 실행하는 데 필요합니다.
+:::
+
+### 옵션 1: 전체 저장소 복제하기
+
+RLMatrix 소스 코드 전체가 필요한 경우:
+
+```bash title="전체 RLMatrix 저장소 복제하기"
+git clone https://github.com/asieradzk/RL_Matrix.git
+```
+
+### 옵션 2: 대시보드만 가져오기
+
+대시보드 구성 요소만 필요한 경우:
+
+```bash title="Git sparse-checkout을 사용하여 대시보드만 복제하기"
+git clone --filter=blob:none --sparse https://github.com/asieradzk/RL_Matrix.git
+cd RL_Matrix
+git sparse-checkout set src/RLMatrix.Dashboard
+```
+
+## 대시보드 실행하기
+
+대시보드 코드를 가지고 있으면 다음과 같이 할 수 있습니다:
+
+1. 선호하는 편집기(Visual Studio 또는 VS Code와 같은)에서 프로젝트 열기
+2. 프로젝트 빌드 및 실행하기
+
+또는 바이너리를 빌드하여 직접 실행할 수도 있습니다.
+
+이것은 Blazor Server 애플리케이션이므로 다음과 유사한 출력이 있는 콘솔 창이 표시됩니다:
+
+```bash title="대시보드 콘솔 출력"
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: https://localhost:7126
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: http://localhost:5069
+info: Microsoft.Hosting.Lifetime[0]
+Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+Content root path: D:\path\to\your\dashboard\RLMatrix.Dashboard
+```
+
+브라우저 창이 자동으로 열리지 않으면 브라우저에서 [https://localhost:7126](https://localhost:7126)으로 이동하세요.
+
+:::tip
+대시보드를 처음 열 때 왼쪽 상단의 실험 드롭다운이 비어 있을 것입니다. 이는 정상적인 현상이며, 훈련이 시작되면 채워집니다.
+:::
+
+## 프로젝트를 대시보드에 연결하기
+
+[시작하기](/beginner/gettingstarted/) 가이드에서 패턴 일치 예제를 다시 살펴보겠습니다. 훈련 코드를 실행하면 콘솔에 다음과 같은 메시지가 표시되어야 합니다:
+
+```
+Connected to dashboard
+```
+
+이 메시지가 표시되지 않으면 연결에 문제가 발생한 것입니다. 다음을 확인하세요:
+1. 대시보드가 실행 중인지
+2. 훈련 코드에 올바른 연결 설정이 있는지
+3. 방화벽이 연결을 차단하고 있지 않은지
+
+## 대시보드 데이터 해석하기
+
+훈련을 시작한 후 대시보드 페이지를 새로고침하세요. 이제 왼쪽 상단 드롭다운 메뉴에 실험 이름이 표시됩니다. 선택하여 훈련 지표를 확인하세요:
+
+![RLMatrix 대시보드](/images/dashboard/dashboard.png)
+
+대시보드는 여러 중요한 지표를 표시합니다:
+
+### 시간에 따른 보상
+이 그래프는 에피소드당 받은 보상을 보여줍니다. 우리의 패턴 일치 예제에서는 AI가 올바른 패턴을 학습함에 따라 -1을 덜 자주 보상하는 것을 볼 수 있습니다.
+
+### 시간에 따른 누적 보상
+이것은 시간이 지남에 따른 보상의 합계를 보여줍니다. **이 그래프의 기울기 변화가 특히 중요합니다** - AI가 보상을 최대화하는 방법을 배울수록 기울기가 더 가파르게 됩니다.
+
+:::note[주목할 점]
+누적 보상 그래프에서 꾸준히 증가하는 기울기는 모델이 개선되고 있음을 나타내는 가장 좋은 지표 중 하나입니다.
+일정한 기울기는 모델이 막혀 있고 더 높은 탐색 자극이 필요하다는 것을 의미할 수 있습니다.
+:::
+
+### 시간에 따른 에피소드 길이
+이것은 각 에피소드가 몇 단계를 거치는지 추적합니다. 간단한 패턴 일치 예제에서는 에피소드당 한 단계만 수행하므로 항상 1입니다. 더 복잡한 환경(Cart-Pole과 같은)에서는 이 지표를 통해 에이전트가 시간이 지남에 따라 더 오래 생존하는지 확인할 수 있습니다.
+
+### 시간에 따른 손실
+이것은 신경망의 손실 함수 값을 보여줍니다. **일반적으로 감소하는 추세를 찾으세요** - 이는 모델이 데이터에 더 잘 적합되고 있음을 나타냅니다.
+
+### 시간에 따른 학습률
+이것은 신경망의 학습률 변화를 표시합니다. 기본적으로 RLMatrix는 훈련 중 작은 진동을 일으키는 스케줄러를 사용합니다.
+
+## 실시간 업데이트
+
+대시보드의 가장 강력한 기능 중 하나는 실시간 업데이트입니다. 훈련이 진행됨에 따라 대시보드는 최신 지표를 반영하기 위해 자동으로 업데이트됩니다.
+
+패턴 일치 예제에서는 콘솔 창에서 Enter를 눌러 훈련을 계속하고 대시보드가 실시간으로 업데이트되는 것을 볼 수 있습니다.
+
+## 훈련 데이터 내보내기
+
+추가 분석이나 기록을 위해 대시보드의 오른쪽 상단 모서리에 있는 "Export as CSV" 버튼을 클릭하여 훈련 데이터를 내보낼 수 있습니다.
+
+이를 통해 다음을 수행할 수 있습니다:
+- Excel이나 다른 도구에서 맞춤형 분석 수행하기
+- 다양한 훈련 실행 비교하기
+- 동료와 결과 공유하기
+
+## 다음 단계
+
+이제 대시보드로 훈련을 모니터링하는 방법을 이해했으니, 더 복잡한 환경과 액션 공간을 탐색할 준비가 되었습니다.
+
+<LinkCard
+    title="연속적인 행동 다루기"
+    description="더 현실적인 제어 문제를 위해 연속적인 액션 공간으로 에이전트를 훈련하는 방법을 배우세요."
+    href="/beginner/continuousactions/"
+/>

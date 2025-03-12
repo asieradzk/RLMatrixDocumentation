@@ -1,0 +1,430 @@
+---
+title: RLMatrix 入門指南
+description: 一份適合初學者的 C# 強化學習介紹
+---
+import Quiz from '@/components/Quiz.astro';
+
+:::tip[已經熟悉 RL？]
+如果您已經熟悉強化學習概念，請查看我們的[快速入門指南](../quickstart/setup)，以獲得更快速的設置。
+:::
+
+## 簡介
+
+當我們編寫傳統程式時，我們會告訴電腦在每種情況下確切應該做什麼。例如，如果我們想編寫一個匹配數字的程式，可能會這樣寫：
+
+```csharp
+if (input == pattern)
+{
+    return "正確！";
+}
+else 
+{
+    return "再試一次！";
+}
+```
+
+但如果我們希望程式自己學習呢？如果規則太複雜無法寫出來，或者我們自己甚至不知道規則呢？這就是強化學習的用武之地。
+
+:::note[什麼是強化學習？]
+<details>
+    <summary>簡單解釋</summary>
+
+    想像一下你學習玩新遊戲的方式：
+    1. 你嘗試一些控制看看會發生什麼
+    2. 你觀察遊戲如何回應
+    3. 你獲得分數或失去生命值
+    4. 隨著時間推移，你學會了什麼策略最有效
+
+    強化學習遵循相同的模式：
+    1. AI（我們稱之為「智能體」）嘗試不同的動作
+    2. 它觀察環境中發生的變化
+    3. 它獲得獎勵或懲罰
+    4. 隨著時間推移，它學會了哪些動作效果最好
+
+    沒有人告訴 AI 具體該做什麼 —— 它通過嘗試錯誤自己找出答案。
+</details>
+:::
+
+## 設置您的專案
+您可以跟隨本教程操作或克隆這個 [GitHub 存儲庫](https:/www.github.com/RLMatrix/RLMatrix-Example)。
+首先，讓我們安裝所有必要組件：
+
+```bash title="通過 NuGet 安裝 RLMatrix"
+dotnet add package RLMatrix
+dotnet add package RLMatrix.Toolkit
+```
+
+:::caution[硬體需求]
+RLMatrix 僅在配備 NVIDIA GPU 的 Windows PC 上進行過測試。但這並非必需，對於許多用例而言，在 CPU 上進行訓練和推論可能已經足夠甚至更快。
+
+如果您沒有兼容的顯示卡，可以：
+1. 從 [RLMatrix 存儲庫](https://github.com/asieradzk/RL_Matrix) 獲取原始碼
+2. 修改它以使用 CPU（在 RLMatrix.csproj 中查找 `TorchSharp-cuda-windows`）
+3. 自行構建專案
+:::
+
+## 您的第一個學習環境
+
+讓我們創建一個簡單但有意義的環境 —— 讓 AI 學習匹配模式。雖然這看起來很基礎（直接編程實現也很簡單），但它引入了我們所需的所有關鍵概念。
+
+:::note[構建模塊]
+<details>
+    <summary>關鍵術語解釋</summary>
+
+    在深入之前，讓我們了解一些重要術語：
+
+    - **環境**：我們的 AI 所處的世界。類似於遊戲板或模擬環境。
+
+    - **狀態/觀察**：我們的 AI 能看到或了解環境的信息。
+    例如：當前需要匹配的模式。
+
+    - **動作**：我們的 AI 可以執行的操作。
+    例如：選擇一個數字。
+
+    - **獎勵**：告訴 AI 表現如何的反饋。
+    例如：正確匹配 +1，錯誤匹配 -1。
+
+    - **回合**：完成任務的一次完整嘗試。
+    可以將其視為遊戲的一輪。
+
+</details>
+:::
+
+以下是我們完整的環境程式碼：
+
+```csharp title="PatternMatchingEnvironment.cs"
+using RLMatrix.Toolkit;
+
+namespace PatternMatchingExample;
+
+[RLMatrixEnvironment]
+public partial class PatternMatchingEnvironment
+{
+    private int pattern = 0;
+    private int aiChoice = 0;
+    private bool roundFinished = false;
+
+    // 最近 50 步的簡單計數器
+    private int correct = 0;
+    private int total = 0;
+
+    // 簡單的準確率計算
+    public float RecentAccuracy => total > 0 ? (float)correct / total * 100 : 0;
+
+    [RLMatrixObservation]
+    public float SeePattern() => pattern;
+
+    [RLMatrixActionDiscrete(2)]
+    public void MakeChoice(int choice)
+    {
+        aiChoice = choice;
+        roundFinished = true;
+
+        // 更新計數器
+        total++;
+        if (aiChoice == pattern) correct++;
+    }
+
+    [RLMatrixReward]
+    public float GiveReward() => aiChoice == pattern ? 1.0f : -1.0f;
+
+    [RLMatrixDone]
+    public bool IsRoundOver() => roundFinished;
+
+    [RLMatrixReset]
+    public void StartNewRound()
+    {
+        pattern = Random.Shared.Next(2);
+        aiChoice = 0;
+        roundFinished = false;
+    }
+
+    public void ResetStats()
+    {
+        correct = 0;
+        total = 0;
+    }
+}
+```
+
+:::note[理解程式碼]
+<details>
+    <summary>程式碼分解</summary>
+
+    讓我們看看每個部分：
+
+    **變數**：
+    ```csharp
+    private int pattern = 0;      // 要匹配的數字
+    private int aiChoice = 0;     // AI 的猜測
+    private bool roundFinished = false;  // 回合狀態
+    ```
+    這些變數追蹤我們環境中發生的情況。
+
+    **特殊屬性**：
+    - `[RLMatrixEnvironment]`：告訴 RLMatrix "這是一個學習環境"
+    - `[RLMatrixObservation]`："這是 AI 能看到的"
+    - `[RLMatrixActionDiscrete]`："這些是 AI 可以做的選擇"
+    - `[RLMatrixReward]`："這是我們如何評分 AI 的表現"
+    - `[RLMatrixReset]`："這是我們如何重新開始"
+
+    工具包使用這些屬性自動生成必要的程式碼。
+</details>
+:::
+
+## 訓練您的 AI
+
+現在進入有趣的部分 —— 教 AI 匹配模式。我們將使用一種稱為 DQN（深度 Q 網路）的演算法。不必太擔心這個名稱 —— 這只是教 AI 做決策的一種方式。
+
+:::note[訓練選項]
+<details>
+    <summary>理解訓練設置</summary>
+
+    我們需要配置 AI 的學習方式：
+
+    - `batchSize`：一次從多少經驗中學習
+    就像一起回顧多次過去的嘗試。
+
+    - `memorySize`：記住多少過去的經驗
+    就像保存一本記錄什麼有效、什麼無效的筆記本。
+
+    - `gamma`：對未來獎勵的重視程度
+    更高的值（接近 1）使 AI 更注重長期思考。
+
+    - `epsStart` 和 `epsEnd`：探索與利用已知信息的平衡
+    就像嘗試新策略與堅持使用已知有效策略之間的平衡。
+
+    有關所有參數及其影響的詳細解釋，請查看我們的[參數參考指南](../../reference/hyperparameters)。
+</details>
+:::
+
+以下是我們如何設置訓練：
+
+```csharp title="Program.cs"
+using RLMatrix.Agents.Common;
+using RLMatrix;
+using PatternMatchingExample;
+
+Console.WriteLine("開始模式匹配訓練...\n");
+
+// 設置 AI 如何學習
+var learningSetup = new DQNAgentOptions(
+    batchSize: 32,      // 一次從 32 個經驗中學習
+    memorySize: 1000,   // 記住最近 1000 次嘗試
+    gamma: 0.99f,       // 非常重視未來獎勵
+    epsStart: 1f,       // 開始時嘗試所有可能
+    epsEnd: 0.05f,      // 最終堅持使用有效策略
+    epsDecay: 150f      // 轉變的速度
+);
+
+// 創建我們的環境
+var environment = new PatternMatchingEnvironment().RLInit();
+var env = new List<IEnvironmentAsync<float[]>> { 
+    environment,
+    //new PatternMatchingEnvironment().RLInit() //你可以添加多個環境並行訓練
+};
+
+// 創建學習智能體
+var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
+
+// 開始學習！
+for (int i = 0; i < 1000; i++)
+{
+    await agent.Step();
+
+    if ((i + 1) % 50 == 0)
+    {
+        Console.WriteLine($"步驟 {i + 1}/1000 - 最近 50 步準確率: {environment.RecentAccuracy:F1}%");
+        environment.ResetStats();
+        
+        Console.WriteLine("\n按 Enter 鍵繼續...");
+        Console.ReadLine();
+    }
+}
+
+Console.WriteLine("\n訓練完成！");
+Console.ReadLine();
+```
+
+當您運行此程式碼時，您將看到每 50 步顯示的訓練進度：
+
+```bash title="訓練進度"
+開始模式匹配訓練...
+
+步驟 50/1000 - 最近 50 步準確率: 48.0%
+按 Enter 鍵繼續...
+
+步驟 100/1000 - 最近 50 步準確率: 68.0%
+按 Enter 鍵繼續...
+
+步驟 150/1000 - 最近 50 步準確率: 86.0%
+按 Enter 鍵繼續...
+
+步驟 200/1000 - 最近 50 步準確率: 82.0%
+按 Enter 鍵繼續...
+```
+
+:::tip[預期結果]
+觀察訓練進度時，您會看到 AI 的改進：
+
+1. 開始時準確率約 50%（隨機猜測）
+2. 隨著學習穩步提高準確率
+3. 最終達到 80-90% 或更高的準確率
+
+每 50 步的暫停讓您觀察從隨機猜測到熟練匹配的進展。這就是強化學習的實際應用！
+:::
+
+## 超越簡單匹配
+
+雖然我們的例子很直接，但相同的原則適用於更複雜的問題：
+
+:::note[現實世界應用]
+<details>
+    <summary>可以拓展到哪些領域</summary>
+
+    我們在這裡使用的基本結構可以擴展到：
+    - 遊戲 AI
+    - 機器人控制
+    - 資源管理
+    - 交通優化
+
+    主要區別在於狀態和動作的複雜性，而不是基本方法。
+</details>
+:::
+
+## 測試您的理解
+<Quiz
+    title="理解強化學習基礎"
+    questions={[
+        {
+            question: "為什麼我們會選擇強化學習而不是傳統編程來完成任務？",
+            options: [
+                {
+                    text: "當我們需要程式以極高精度工作時",
+                    correct: false,
+                    explanation: "實際上，當我們確切知道想要什麼時，傳統編程通常在精度方面表現更佳。強化學習在規則複雜或未知的場景中表現出色，而不一定是在追求最大精度時。"
+                },
+                {
+                    text: "當規則太複雜而無法手動編程，或者我們自己不完全了解規則時",
+                    correct: true,
+                    explanation: "完全正確！強化學習在規則太複雜而無法具體說明（如平衡機器人）或當我們自己不完全理解最佳方法時特別有價值。AI 可以通過經驗而不是明確編程來發現解決方案。"
+                },
+                {
+                    text: "當我們需要程式比傳統代碼運行得更快時",
+                    correct: false,
+                    explanation: "強化學習不是關於執行速度的 —— 事實上，傳統編程通常運行得更快。RL 是關於讓程式從經驗中學習，而不是為每種情況明確編碼。"
+                }
+            ],
+            hint: "思考傳統 if/else 編程的局限性，相比讓系統通過嘗試錯誤發現模式。"
+        },
+        {
+            question: "在我們的例子中，為什麼將 epsStart 設為 1.0 且 epsEnd 設為較低值如 0.05 很重要？",
+            options: [
+                {
+                    text: "這確保智能體總是選擇最高獎勵的動作",
+                    correct: false,
+                    explanation: "這不是其目的。如果智能體總是選擇它認為最好的（純利用），它將永遠不會發現可能更好的尚未嘗試的策略。"
+                },
+                {
+                    text: "這些設置控制智能體隨時間的學習率",
+                    correct: false,
+                    explanation: "雖然這些參數確實隨時間變化，但它們並不直接控制學習率（那是 'lr' 參數）。它們控制強化學習的另一個基本方面。"
+                },
+                {
+                    text: "這創造了隨時間變化的探索（嘗試新事物）與利用（使用已知有效策略）之間的平衡",
+                    correct: true,
+                    explanation: "正確！這是經典的探索-利用平衡。從 epsStart: 1f 開始，智能體最初嘗試所有可能（純探索）。隨著訓練進行，它逐漸轉向 epsEnd: 0.05f，在那裡它主要使用學到的最有效策略（主要是利用）的同時仍偶爾探索。"
+                }
+            ],
+            hint: "考慮訓練開始與後期的區別 —— 智能體的行為如何變化，為什麼這很重要？"
+        },
+        {
+            question: "如果我們修改獎勵函數，只為正確匹配給 +1 但不對錯誤匹配進行懲罰，可能會發生什麼？",
+            options: [
+                {
+                    text: "學習會更快，因為智能體只會收到正面反饋",
+                    correct: false,
+                    explanation: "沒有懲罰，智能體實際上會學習得更慢或可能根本不學習。只有正面獎勵時，隨機猜測仍有 50% 的時間獲得獎勵，幾乎沒有動力超越隨機機會。"
+                },
+                {
+                    text: "學習會變慢或失敗，因為智能體不會收到關於錯誤動作的明確反饋",
+                    correct: true,
+                    explanation: "確實如此！這強調了精心設計獎勵函數的重要性。沒有對錯誤匹配的懲罰，智能體在犯錯時無法區分對錯的反饋。它可能會認為隨機猜測已經足夠好，因為它仍然有一半時間獲得獎勵。"
+                },
+                {
+                    text: "智能體會學習相同的模式，但需要更多內存來存儲經驗",
+                    correct: false,
+                    explanation: "內存需求與獎勵結構沒有直接關係。這裡的關鍵問題是智能體接收到的學習信號質量，而不是它使用多少內存。"
+                }
+            ],
+            hint: "思考什麼激勵學習 —— 是僅僅接收獎勵，還是也包括避免懲罰？"
+        },
+        {
+            question: "在我們的例子中，gamma（設置為 0.99f）在學習過程中扮演什麼角色？",
+            options: [
+                {
+                    text: "它決定智能體一次能記住多少模式",
+                    correct: false,
+                    explanation: "模式記憶容量主要與神經網絡架構有關，而不是 gamma 參數。Gamma 在智能體評估獎勵方面有不同的用途。"
+                },
+                {
+                    text: "它控制智能體對即時獎勵與潛在未來獎勵的重視程度",
+                    correct: true,
+                    explanation: "正確！Gamma 是決定智能體如何評估未來獎勵相對於即時獎勵的折扣因子。我們設置的高值 0.99f 使智能體幾乎同等重視未來獎勵與即時獎勵，鼓勵它學習能在長期帶來良好結果的策略。"
+                },
+                {
+                    text: "它設置智能體忘記失敗嘗試的速度",
+                    correct: false,
+                    explanation: "智能體對過去經驗的記憶是由 memorySize 參數控制的，而非 gamma。Gamma 影響智能體如何評估跨時間的動作價值。"
+                }
+            ],
+            hint: "在更複雜的環境中，動作並不總是帶來即時獎勵。智能體如何在現在的小獎勵與潛在的更大未來獎勵之間做決定？"
+        },
+        {
+            question: "根據您所學，哪項任務最適合強化學習方法？",
+            options: [
+                {
+                    text: "按升序排序數字列表",
+                    correct: false,
+                    explanation: "排序是一個已知最優演算法的充分理解問題。傳統編程在這裡更合適，因為我們確切知道對任何輸入應該產生什麼正確輸出。"
+                },
+                {
+                    text: "平衡具有複雜關節動力學的模擬機器人",
+                    correct: true,
+                    explanation: "完美選擇！機器人平衡涉及難以精確建模的複雜物理，有許多保持平衡的潛在策略。這正是 RL 閃光的例子 —— 當規則複雜且最佳策略即使對人類也不明顯時。"
+                },
+                {
+                    text: "在攝氏度和華氏度之間轉換溫度",
+                    correct: false,
+                    explanation: "這是一個簡單的數學公式（F = C × 9/5 + 32），可以輕鬆用傳統編程實現。每個輸入都有單一正確答案，使強化學習對此任務不必要地複雜。"
+                }
+            ],
+            hint: "考慮哪項任務具有難以明確指定但可以通過嘗試錯誤學習的規則。"
+        }
+    ]}
+/>
+
+## 後續步驟
+
+準備更進一步？您的下一步可以是：
+- [如何使用儀表板？](../beginner/howtodashboard)
+- [使用連續動作](../beginner/continuousactions)
+- [Cart-Pole 示例](../beginner/cartpole)
+
+我們有兩種主要演算法可用：
+- DQN：我們剛剛使用的，適合簡單選擇，受益於大型重放記憶體。
+- PPO：更高級，處理連續動作（如控制速度或方向）
+
+:::note[理解您的進度]
+<details>
+    <summary>關鍵要點</summary>
+
+    您已經學習了：
+    1. 強化學習如何與傳統編程不同
+    2. 如何創建基本學習環境
+    3. 如何設置並運行訓練
+    4. 更複雜應用的構建模塊
+
+    最重要的是，您已經看到我們如何通過經驗而非明確指令來教會電腦。
+</details>
+:::

@@ -1,0 +1,422 @@
+---
+title: Praca z akcjami ciągłymi
+description: Wprowadzenie do akcji ciągłych w RLMatrix i uczeniu przez wzmacnianie.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+import Quiz from '@/components/Quiz.astro';
+
+Zacznijmy od projektu z naszego [poprzedniego samouczka](/beginner/gettingstarted/) i dodajmy do niego akcje ciągłe. Możesz podążać za instrukcjami, używając [projektu startowego](https://github.com/asieradzk/RLMatrixGettingStartedExample1) lub sprawdzić [kompletny projekt](https://github.com/asieradzk/RLMatrixGettingStartedExample2_ContinuousActions), jeśli wolisz.
+
+## Akcje dyskretne a ciągłe
+
+W poprzednim przewodniku pracowaliśmy z akcjami dyskretnymi - nasz agent musiał wybierać spośród skończonego zbioru opcji (0 lub 1), aby dopasować wzorzec. W rzeczywistych scenariuszach możemy otrzymywać mnóstwo danych z czujników i wizualnych danych wejściowych, by zdecydować, który przycisk nacisnąć.
+
+:::tip[Zabezpiecz swoje projekty na przyszłość]
+Jeśli możesz ZDYSKRETYZOWAĆ swoje przestrzenie akcji tak, aby decyzje można było uprościć do skończonej liczby naciśnięć przycisków (akcje dyskretne), zrób to! Sprawia to, że sygnały uczenia są znacznie bardziej widoczne i drastycznie przyspiesza trening, czego doświadczymy bezpośrednio w tym samouczku.
+:::
+
+Jednak w wielu zastosowaniach z prawdziwego świata nie zawsze jest to możliwe. Do kontrolowania takich rzeczy jak:
+- Kąty skrętu w pojazdach
+- Momenty obrotowe w stawach robotycznych ramion
+- Poziomy mocy w silnikach
+
+Nasz agent będzie musiał generować akcje ciągłe—precyzyjne wartości zmiennoprzecinkowe, a nie wybory kategoryczne.
+
+## Dodawanie akcji ciągłych do naszego środowiska
+
+Zmodyfikujmy nasze środowisko, aby zawierało zarówno akcje dyskretne, jak i ciągłe. Zachowamy nasze oryginalne zadanie dopasowywania wzorca, ale dodamy drugi wzorzec, w którym oczekujemy, że AI wygeneruje pierwiastek kwadratowy tej nowej wartości.
+
+Zauważ, jak nie zmieniamy niczego poza naszymi OCZEKIWANIAMI—agent będzie musiał odkryć, czego chcemy, metodą prób i błędów, kierując się jedynie sygnałami nagród!
+
+Najpierw dodajmy nowe pola do śledzenia drugiego wzorca i akcji ciągłej w `PatternMatchingEnvironment.cs`:
+
+```csharp title="PatternMatchingEnvironment.cs" ins="private int pattern2 = 0;" ins="private float aicontinuousChoice = 0f;"
+private int pattern = 0;
+private int pattern2 = 0;
+private int aiChoice = 0;
+private float aicontinuousChoice = 0f;
+private bool roundFinished = false;
+```
+
+Następnie dodajmy drugą metodę obserwacji i naszą metodę akcji ciągłej:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixObservation]
+public float SeePattern() => pattern;
+
+[RLMatrixObservation]
+public float SeePattern2() => pattern2;
+
+[RLMatrixActionContinuous]
+public void MakeChoiceContinuous(float input)
+{
+    aicontinuousChoice = input;
+}
+```
+
+Teraz utwórzmy nasze funkcje nagrody:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float GiveReward() => aiChoice == pattern ? 1.0f : -1.0f;
+
+// Dodaj +2 nagrody, gdy ciągłe wyjście AI jest bliskie pierwiastkowi kwadratowemu
+// drugiego wzorca
+[RLMatrixReward]
+public float ExtraRewards() => Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2)) < 0.1f ? 2f : 0.0f;
+```
+
+Na koniec musimy zaktualizować naszą metodę `StartNewRound`, aby generowała oba wzorce:
+
+```csharp title="PatternMatchingEnvironment.cs" ins="pattern2 = Random.Shared.Next(10);"
+[RLMatrixReset]
+public void StartNewRound()
+{
+    pattern = Random.Shared.Next(2);
+    pattern2 = Random.Shared.Next(10);
+    aiChoice = 0;
+    roundFinished = false;
+}
+```
+
+Zauważ, że używamy zakresu 0-9 dla pattern2, co daje naszemu agentowi bardziej interesujące wyzwanie przewidywania różnych pierwiastków kwadratowych.
+
+## Naprawianie błędów kompilacji
+
+Kiedy spróbujesz zbudować rozwiązanie, napotkasz serię błędów. Jest to właściwie pomocne—RLMatrix używa silnego typowania, aby zapobiec błędom czasu wykonania i prowadzić Cię w kierunku prawidłowej implementacji dla akcji ciągłych.
+
+### Błąd 1: Niezgodność typu środowiska
+
+```
+Argument 1: cannot convert from 'PatternMatchingExample.PatternMatchingEnvironment' to 'RLMatrix.IEnvironmentAsync<float[]>'
+```
+
+Dzieje się tak, ponieważ RLMatrix ma różne interfejsy dla środowisk ciągłych i dyskretnych, aby zapewnić bezpieczeństwo typów. Zaktualizujmy nasz kod w `Program.cs`:
+
+```diff lang="csharp" title="Program.cs - Typ środowiska"
+-var env = new List<IEnvironmentAsync<float[]>> {
++var env = new List<IContinuousEnvironmentAsync<float[]>> {
+    environment,
+    //new PatternMatchingEnvironment().RLInit() //możesz dodać więcej środowisk do trenowania równoległego
+};
+```
+
+### Błąd 2: Niezgodność typu agenta
+
+Po tej zmianie otrzymamy drugi błąd:
+
+```
+Argument 2: cannot convert from 'System.Collections.Generic.List<RLMatrix.IContinuousEnvironmentAsync<float[]>>' to 'System.Collections.Generic.IEnumerable<RLMatrix.IEnvironmentAsync<float[]>>'
+```
+
+To dlatego, że próbujemy użyć agenta dyskretnego ze środowiskiem ciągłym. Musimy zmienić typ agenta:
+
+```diff lang="csharp" title="Program.cs - Typ agenta"
+-var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
++var agent = new LocalContinuousRolloutAgent<float[]>(learningSetup, env);
+```
+
+### Błąd 3: Niezgodność opcji algorytmu
+
+To prowadzi do naszego trzeciego błędu:
+
+```
+Argument 1: cannot convert from 'RLMatrix.DQNAgentOptions' to 'RLMatrix.PPOAgentOptions'
+```
+
+Ten ostatni błąd pokazuje, że DQN jest niekompatybilny z akcjami ciągłymi. Musimy przełączyć się na PPO (Proximal Policy Optimization), który może obsługiwać zarówno dyskretne, jak i ciągłe przestrzenie akcji:
+
+```diff lang="csharp" title="Program.cs - Opcje algorytmu"
+-var learningSetup = new DQNAgentOptions(
+-    batchSize: 32,      
+-    memorySize: 1000,   
+-    gamma: 0.99f,      
+-    epsStart: 1f,     
+-    epsEnd: 0.05f,      
+-    epsDecay: 150f      
+-);
++var learningSetup = new PPOAgentOptions(
++    batchSize: 128,
++    memorySize: 1000,
++    gamma: 0.99f,
++    width: 128,
++    lr: 1E-03f
++);
+```
+
+:::note[DQN vs PPO]
+DQN jest zaprojektowany specjalnie dla dyskretnych przestrzeni akcji i nie ma mechanizmu obsługi ciągłych wyjść. PPO natomiast jest algorytmem aktora-krytyka, który może obsługiwać akcje dyskretne, ciągłe lub obie jednocześnie.
+
+Każdy algorytm ma swoje mocne strony—DQN może być bardzo efektywny próbkowo dla problemów dyskretnych, podczas gdy PPO często bardziej solidnie radzi sobie ze złożonymi środowiskami. RLMatrix udostępnia oba, więc możesz wybrać w oparciu o swoje konkretne potrzeby.
+:::
+
+
+
+## Nasz pierwszy przebieg uczenia
+
+Teraz uruchommy trening i zobaczmy, co się stanie:
+
+```bash title="Wyjście uczenia"
+Krok 800/1000 - Dokładność z ostatnich 50 kroków: 42.0%
+Naciśnij Enter, aby kontynuować...
+
+Krok 850/1000 - Dokładność z ostatnich 50 kroków: 38.0%
+Naciśnij Enter, aby kontynuować...
+
+Krok 900/1000 - Dokładność z ostatnich 50 kroków: 40.0%
+Naciśnij Enter, aby kontynuować...
+
+Krok 950/1000 - Dokładność z ostatnich 50 kroków: 38.0%
+Naciśnij Enter, aby kontynuować...
+
+Krok 1000/1000 - Dokładność z ostatnich 50 kroków: 37.0%
+Naciśnij Enter, aby kontynuować...
+```
+
+Niespodzianka! AI prawie się nie uczy. Dokładność nie przekracza 50%, a jeśli sprawdzimy dashboard, zobaczymy, że regularnie zbiera nagrody +1 za akcje dyskretne (dopasowanie wzorca), ale rzadko otrzymuje nagrody +2 za akcje ciągłe (przewidywanie √pattern2).
+
+## Dlaczego tak się dzieje?
+
+Zadaj sobie pytanie: Dlaczego AI o wiele łatwiej uczy się dopasowywać akcję dyskretną niż ciągłą?
+
+Twój pierwszy instynkt może dotyczyć współczynnika uczenia (`lr`)—może jest zbyt niski? Spróbujmy zmienić go na `1E-02f` i uruchomić trening ponownie...
+
+Czy to pomogło? Prawdopodobnie nie. W rzeczywistości możesz zauważyć, że podczas gdy agent szybciej uczy się akcji dyskretnej, prawie wcale nie eksploruje przestrzeni akcji ciągłych, a dokładność pogarsza się jeszcze bardziej w miarę postępu treningu.
+
+Więc co się naprawdę dzieje?
+
+:::caution[Fundamentalne wyzwanie]
+Prawdopodobieństwo, że AI trafi dokładnie w prawidłową akcję ciągłą poprzez losową eksplorację, jest znikomo małe.
+
+Pomyśl o tym:
+- W przypadku wyborów dyskretnych (0 lub 1), losowe zgadywanie daje 50% szans na poprawność
+- W przypadku wartości ciągłych, jakie są szanse losowego wygenerowania:
+- √0 = 0 gdy pattern2 = 0
+- √1 = 1 gdy pattern2 = 1
+- √2 ≈ 1.414 gdy pattern2 = 2
+- √3 ≈ 1.732 gdy pattern2 = 3
+- ...i tak dalej aż do √9 = 3
+
+Tworzy to problem rzadkiej nagrody—agent rzadko przypadkowo trafia na prawidłową akcję, więc otrzymuje mało użytecznych informacji zwrotnych, z których mógłby się uczyć.
+:::
+
+## Dodawanie sygnału naprowadzającego
+
+Spróbujmy zaradzić temu, dostarczając bardziej pomocny sygnał nagrody. Dodamy nagrodę, która rośnie w miarę, jak agent zbliża się do poprawnego pierwiastka kwadratowego, zamiast nagradzać tylko dokładne dopasowania:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float ExtraSupportingReward() => 0.5f / (1 + Math.Abs(aicontinuousChoice - (float)Math.Sqrt(pattern2)));
+
+//Nie zapomnij ustawić swojego lr z powrotem na 1E-03f!
+```
+
+Ta funkcja nagrody tworzy gradient—ciągły sygnał, który staje się silniejszy, gdy agent zbliża się do prawidłowej wartości. Nawet gdy nie jest dokładnie trafiony, otrzymuje informację zwrotną o tym, czy jest "cieplej" czy "zimniej".
+
+:::tip[Inżynieria nagród]
+To ilustruje kluczową zasadę w uczeniu przez wzmacnianie, nazywaną **kształtowaniem nagrody**:
+
+- **Rzadkie nagrody** (wszystko albo nic) sprawiają, że uczenie jest prawie niemożliwe w przestrzeniach ciągłych
+- **Gęste/kształtowane nagrody** tworzą gradient, który kieruje procesem uczenia
+- Nawet mały sygnał o "robieniu się cieplej" może stanowić różnicę między nauczeniem się w godziny a nigdy się nie nauczeniem
+
+Pomyśl o tym jak o pomaganiu osobie z zawiązanymi oczami znaleźć drogę przez pokój:
+- Rzadka nagroda: "Dotarłeś do drzwi" (ale cisza w przeciwnym razie)
+- Kształtowana nagroda: "Cieplej... cieplej... zimniej... znowu cieplej..."
+
+Drugie podejście prowadzi do sukcesu znacznie bardziej niezawodnie. Jest to szczególnie kluczowe dla problemów ciągłego sterowania, gdzie agent musi odkryć precyzyjne wartości.
+:::
+
+Uruchommy trening ponownie z tą zmianą i zobaczmy, co się stanie:
+
+```bash title="Wyjście uczenia"
+Krok 850/1000 - Dokładność z ostatnich 50 kroków: 35.0%
+Naciśnij Enter, aby kontynuować...
+
+Krok 900/1000 - Dokładność z ostatnich 50 kroków: 40.0%
+Naciśnij Enter, aby kontynuować...
+
+Krok 950/1000 - Dokładność z ostatnich 50 kroków: 47.0%
+Naciśnij Enter, aby kontynuować...
+
+Krok 1000/1000 - Dokładność z ostatnich 50 kroków: 36.0%
+Naciśnij Enter, aby kontynuować...
+```
+
+Widzimy pewne niewielkie ulepszenia, ale wciąż nie jest to świetne. Dashboard może pokazywać oznaki, że uczenie postępuje, ale wyraźnie potrzebujemy więcej czasu treningu dla tego bardziej złożonego zadania.
+
+## Wydłużanie czasu uczenia
+
+W przypadku bardziej złożonych wyzwań, takich jak przewidywanie akcji ciągłych, często potrzebujemy więcej kroków uczenia. Zmodyfikujmy nasz program, aby trenował przez 10 000 kroków zamiast 1 000:
+
+```csharp title="Program.cs" {1,5}
+for (int i = 0; i < 10000; i++)
+{
+    await agent.Step();
+
+    if ((i + 1) % 500 == 0)
+    {
+        Console.WriteLine($"Krok {i + 1}/10000 - Dokładność z ostatnich 500 kroków: {environment.RecentAccuracy:F1}%");
+        environment.ResetStats();
+        
+        Console.WriteLine("\nNaciśnij Enter, aby kontynuować...");
+        Console.ReadLine();
+    }
+}
+```
+
+## Eksperyment: Wpływ współczynnika uczenia
+
+Obserwując dłuższy postęp uczenia, spróbuj poeksperymentować z różnymi współczynnikami uczenia. Co się stanie, jeśli obniżysz go jeszcze bardziej? A co, jeśli znacznie go zwiększysz?
+
+W moich eksperymentach ustawienie bardzo wysokiego współczynnika uczenia powoduje, że model utyka, zbierając tylko nagrody +1 za akcje dyskretne, podczas gdy kompletnie nie eksploruje przestrzeni akcji ciągłych.
+
+:::tip[Spostrzeżenia dotyczące współczynnika uczenia]
+Szczególnie z PPO, zwiększanie współczynnika uczenia nie zawsze jest lepsze dla eksploracji:
+
+- **Za wysoki**: Agent szybko skupia się na strategiach, które znalazł jako pierwsze, często ignorując trudniejsze do odkrycia wzorce akcji ciągłych
+- **Za niski**: Uczenie przebiega boleśnie wolno, ale eksploruje bardziej dokładnie
+- **W sam raz**: Odpowiednio równoważy eksplorację i eksploatację dla Twojego zadania
+
+Ta nieintuicyjna relacja między współczynnikiem uczenia a jakością eksploracji jest szczególnie ważna podczas pracy z ciągłymi przestrzeniami akcji.
+:::
+
+## Kluczowe wnioski
+
+Poprzez to ćwiczenie nauczyliśmy się kilku ważnych lekcji:
+
+1. **Akcje ciągłe są z natury trudniejsze do nauczenia** niż dyskretne, ze względu na problem rzadkiej nagrody. Gdy to możliwe, dyskretyzuj swoją przestrzeń akcji!
+
+2. **Inżynieria nagród ma ogromne znaczenie** dla problemów ciągłego sterowania. Dostarczanie sygnału o "zbliżaniu się" przekształca niemożliwe zadanie uczenia w wykonalne.
+
+3. **Złożone zadania wymagają więcej czasu uczenia**. Dodając wymiary do naszej przestrzeni akcji, musimy odpowiednio skalować czas trwania uczenia.
+
+4. **Wybór algorytmu jest kluczowy**. DQN w ogóle nie radzi sobie z akcjami ciągłymi, podczas gdy PPO może obsługiwać dyskretne, ciągłe lub mieszane przestrzenie akcji.
+
+5. **Dostrajanie współczynnika uczenia jest delikatne**, szczególnie z PPO. Wyższy nie zawsze jest lepszy i czasami może być gorszy dla eksploracji.
+
+Te zasady dobrze Ci posłużą, gdy będziesz podejmować bardziej złożone wyzwania uczenia przez wzmacnianie z RLMatrix.
+
+## Sprawdź swoje zrozumienie
+
+<Quiz
+    title="Zrozumienie akcji ciągłych"
+    questions={[
+        {
+            question: "Dlaczego agentowi jest znacznie trudniej nauczyć się akcji ciągłych w porównaniu z dyskretnymi?",
+            options: [
+                {
+                    text: "Akcje ciągłe wymagają więcej zasobów obliczeniowych ze względu na złożoność obliczeń sieci neuronowych",
+                    correct: false,
+                    explanation: "Chociaż ciągłe przestrzenie akcji mogą wymagać bardziej złożonych sieci neuronowych, nie jest to fundamentalny powód trudności w uczeniu. Główne wyzwanie jest znacznie bardziej podstawowe dla problemu eksploracji-eksploatacji w uczeniu przez wzmacnianie."
+                },
+                {
+                    text: "Prawdopodobieństwo losowego eksplorowania prawidłowej wartości ciągłej jest znikomo małe w porównaniu z wybieraniem z małego zbioru opcji dyskretnych",
+                    correct: true,
+                    explanation: "Dokładnie tak! To problem rzadkiej nagrody w działaniu. Podczas losowej eksploracji agent ma około 50% szans na poprawny wybór binarny, ale znalezienie dokładnie √2 ≈ 1,414... spośród wszystkich możliwych wartości zmiennoprzecinkowych jest praktycznie niemożliwe przez czysty przypadek. To sprawia, że początkowe sygnały uczenia są niezwykle rzadkie bez odpowiedniego kształtowania nagrody."
+                },
+                {
+                    text: "Algorytmy PPO są z natury mniej efektywne niż algorytmy DQN dla wszystkich rodzajów zadań uczenia",
+                    correct: false,
+                    explanation: "To nie jest dokładne. PPO i DQN mają różne mocne strony - DQN może być bardziej efektywny próbkowo dla problemów dyskretnych, podczas gdy PPO jest bardziej wszechstronny i może obsługiwać ciągłe przestrzenie akcji, czego DQN fundamentalnie nie potrafi. Żaden nie jest uniwersalnie lepszy od drugiego."
+                }
+            ],
+            hint: "Pomyśl o tym, co dzieje się, gdy agent eksploruje losowo na początku treningu. Jakie są szanse na znalezienie prawidłowej akcji w każdym przypadku?"
+        },
+        {
+            question: "Jaka kluczowa technika przekształciła nasz problem uczenia akcji ciągłych z prawie niemożliwego na wykonalny?",
+            options: [
+                {
+                    text: "Zwiększenie liczby kroków treningu z 1 000 do 10 000",
+                    correct: false,
+                    explanation: "Chociaż więcej czasu treningu jest ważne, samo to nie rozwiązałoby fundamentalnego problemu rzadkiej nagrody. Nasz agent wciąż miałby problemy z uczeniem się bez ważniejszej zmiany, którą wprowadziliśmy."
+                },
+                {
+                    text: "Zmiana z algorytmu DQN na PPO",
+                    correct: false,
+                    explanation: "Ta zmiana była konieczna (ponieważ DQN w ogóle nie może obsługiwać akcji ciągłych), ale nie była wystarczająca. Nawet z PPO nasz agent początkowo miał problemy z rzadkim sygnałem nagrody."
+                },
+                {
+                    text: "Dodanie funkcji kształtowania nagrody, która dostarcza informacji zwrotnej na podstawie tego, jak blisko agent jest prawidłowej wartości",
+                    correct: true,
+                    explanation: "Dokładnie! To jest kształtowanie nagrody w działaniu. Dodając funkcję ExtraSupportingReward, która zwraca 0,5f / (1 + Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2))), stworzyliśmy gradient, który dostarcza użytecznych sygnałów uczenia, nawet gdy agent nie jest dokładnie prawidłowy. To jak dawanie informacji zwrotnej 'cieplej/zimniej' zamiast ciszy, dopóki nie znajdzie dokładnego celu."
+                }
+            ],
+            hint: "Zastanów się, która zmiana adresowała fundamentalne wyzwanie rzadkich nagród w ciągłych przestrzeniach akcji."
+        },
+        {
+            question: "Jaką nieintuicyjną zależność zaobserwowaliśmy w odniesieniu do współczynnika uczenia w PPO dla zadań z akcjami ciągłymi?",
+            options: [
+                {
+                    text: "Wyższe współczynniki uczenia powodowały, że agent skupiał się tylko na łatwiejszych nagrodach dyskretnych, zaniedbując akcje ciągłe",
+                    correct: true,
+                    explanation: "Zgadza się! Zaobserwowaliśmy, że przy bardzo wysokich współczynnikach uczenia agent szybko uczył się wzorca akcji dyskretnej (nagroda +1), a następnie skupiał się na tym, efektywnie ignorując przestrzeń akcji ciągłych, która zapewnia nagrodę +2, ale jest trudniejsza do odkrycia. To pokazuje, jak współczynnik uczenia wpływa na równowagę eksploracji/eksploatacji."
+                },
+                {
+                    text: "Niższe współczynniki uczenia zawsze prowadziły do szybszej zbieżności do optymalnych polityk",
+                    correct: false,
+                    explanation: "To przeciwieństwo tego, co zaobserwowaliśmy. Niższe współczynniki uczenia faktycznie prowadziły do wolniejszego uczenia ogólnie, ale czasami lepszej eksploracji przestrzeni akcji ciągłych. Jest tu delikatna równowaga do znalezienia."
+                },
+                {
+                    text: "Współczynnik uczenia nie miał znaczącego wpływu na wynik treningu",
+                    correct: false,
+                    explanation: "Współczynnik uczenia miał znaczący wpływ na wyniki treningu. Wpływał zarówno na szybkość uczenia się, jak i, co ważniejsze, na równowagę eksploracji-eksploatacji, szczególnie w odniesieniu do tego, jak agent priorytetyzował łatwiejsze nagrody dyskretne w porównaniu z trudniejszymi do odkrycia wzorcami akcji ciągłych."
+                }
+            ],
+            hint: "Przypomnij sobie, co się stało, gdy eksperymentowaliśmy z różnymi współczynnikami uczenia i jak to wpłynęło na zdolność agenta do odkrywania obu typów nagród."
+        },
+        {
+            question: "Gdybyś projektował system sterowania robotem, który musi określić zarówno KTÓRY przycisk nacisnąć (spośród 4 przycisków), JAK i z jaką siłą (0-100%), jakie podejście byłoby najskuteczniejsze na podstawie tej lekcji?",
+            options: [
+                {
+                    text: "Użyj DQN dla jego efektywności i zdyskretyzuj siłę nacisku na 10 poziomów (0%, 10%, 20% itd.)",
+                    correct: true,
+                    explanation: "Doskonały wybór! To podąża za kluczową zasadą z samouczka: 'Jeśli możesz ZDYSKRETYZOWAĆ swoje przestrzenie akcji, zrób to!' Przekształcając nacisk w 10 dyskretnych poziomów, przekształciliśmy trudny problem ciągły w zarządzalny problem dyskretny z zaledwie 40 całkowitymi akcjami (4 przyciski × 10 poziomów nacisku). DQN nauczy się tej zdyskretyzowanej przestrzeni znacznie wydajniej niż zmagając się z wartościami ciągłymi."
+                },
+                {
+                    text: "Użyj PPO z domyślnymi ustawieniami i pozwól mu rozwiązać oba aspekty jednocześnie",
+                    correct: false,
+                    explanation: "Chociaż PPO może obsługiwać mieszane przestrzenie akcji, użycie go z domyślnymi ustawieniami prawdopodobnie prowadziłoby do suboptymalnego uczenia. Lekcja pokazała nam, że akcje ciągłe są z natury trudne do nauczenia poprzez losową eksplorację. Bez dyskretyzacji lub starannego kształtowania nagrody, uczenie byłoby nieefektywne."
+                },
+                {
+                    text: "Użyj PPO z kształtowanymi nagrodami, które zapewniają informację zwrotną o dokładności nacisku, i traktuj nacisk jako prawdziwą wartość ciągłą",
+                    correct: false,
+                    explanation: "Chociaż to podejście mogłoby ostatecznie zadziałać, ignoruje kluczowe spostrzeżenie z samouczka, że dyskretyzacja akcji, gdy jest to możliwe, prowadzi do szybszego, bardziej niezawodnego uczenia. Traktowanie nacisku jako wartości ciągłej tworzy niepotrzebnie trudny problem uczenia, gdy dyskretyzacja na 10 poziomów byłaby prawdopodobnie wystarczająca dla zadania."
+                }
+            ],
+            hint: "Pamiętaj o mocnej rekomendacji samouczka dotyczącej dyskretyzacji przestrzeni akcji, gdy to możliwe, i zastanów się, które podejście najbardziej upraszcza problem uczenia."
+        },
+        {
+            question: "Na podstawie wzorców, które zaobserwowaliśmy, który scenariusz byłby prawdopodobnie NAJTRUDNIEJSZY dla agenta uczenia przez wzmacnianie?",
+            options: [
+                {
+                    text: "Nauczenie się wyboru jednej z trzech predefiniowanych tras przez labirynt",
+                    correct: false,
+                    explanation: "To prosty problem akcji dyskretnej z zaledwie trzema opcjami. Na podstawie naszej lekcji, dyskretne przestrzenie akcji z niewielką liczbą opcji są najłatwiejsze dla agentów uczenia przez wzmacnianie do efektywnej eksploracji."
+                },
+                {
+                    text: "Nauczenie się regulacji temperatury systemu dokładnie do 37,85°C z minimalnym wahaniem",
+                    correct: true,
+                    explanation: "To rzeczywiście najtrudniejszy scenariusz! Obejmuje znalezienie niezwykle precyzyjnej wartości ciągłej (dokładnie 37,85°C) i utrzymanie jej z minimalnym odchyleniem. Bez odpowiednio ukształtowanych nagród agent miałby ogromne trudności z odkryciem tej precyzyjnej wartości zadanej poprzez losową eksplorację, co czyni ją dokładnie takim rodzajem problemu rzadkich nagród, o którym mówiliśmy."
+                },
+                {
+                    text: "Nauczenie się rozpoznawania i sortowania 10 różnych typów obiektów na podstawie danych wizualnych",
+                    correct: false,
+                    explanation: "Chociaż obejmuje to więcej opcji dyskretnych (10 kategorii), jest to wciąż fundamentalnie dyskretny problem klasyfikacji. Agent otrzymuje jasną informację zwrotną o tym, czy klasyfikował poprawnie czy nie, unikając wyzwania rzadkich nagród charakterystycznego dla ciągłych przestrzeni akcji."
+                }
+            ],
+            hint: "Pomyśl, który scenariusz przypomina szukanie igły w stogu siana pod względem eksploracji przestrzeni akcji."
+        }
+    ]}
+/>
+
+## Następne kroki
+
+Teraz, gdy rozumiesz wyzwania związane z ciągłymi przestrzeniami akcji i jak sobie z nimi radzić, jesteś gotowy, aby wypróbować klasyczny problem uczenia przez wzmacnianie z bardziej złożonymi obserwacjami.
+
+<LinkCard
+    title="Przykład Cart-Pole"
+    description="Naucz się balansować drążkiem na ruchomym wózku przy użyciu uczenia przez wzmacnianie."
+    href="/beginner/cartpole/"
+/>

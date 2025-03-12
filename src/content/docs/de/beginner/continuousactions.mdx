@@ -1,0 +1,422 @@
+---
+title: Arbeiten mit kontinuierlichen Aktionen
+description: Einführung in kontinuierliche Aktionen in RLMatrix und Reinforcement Learning.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+import Quiz from '@/components/Quiz.astro';
+
+Beginnen wir mit dem Projekt aus unserem [vorherigen Tutorial](/beginner/gettingstarted/) und fügen kontinuierliche Aktionen hinzu. Sie können entweder mit dem [Starterprojekt](https://github.com/asieradzk/RLMatrixGettingStartedExample1) folgen oder das [vollständige Projekt](https://github.com/asieradzk/RLMatrixGettingStartedExample2_ContinuousActions) nutzen, wenn Sie dies bevorzugen.
+
+## Diskrete vs. kontinuierliche Aktionen
+
+Im vorherigen Leitfaden haben wir mit diskreten Aktionen gearbeitet - unser Agent musste zwischen einer endlichen Menge von Optionen (0 oder 1) wählen, um ein Muster abzugleichen. In realen Szenarien könnten wir eine Vielzahl von Sensordaten und visuellen Eingaben erhalten, um zu entscheiden, welche Taste zu drücken ist.
+
+:::tip[Zukunftssichere Projekte]
+Wenn Sie Ihre Aktionsräume DISKRETISIEREN können, sodass Entscheidungen auf eine endliche Anzahl von Tastendrücken (diskrete Aktionen) vereinfacht werden können, tun Sie es! Dies macht die Lernsignale viel sichtbarer und beschleunigt das Training drastisch, wie wir in diesem Tutorial aus erster Hand erleben werden.
+:::
+
+In vielen realen Anwendungen ist dies jedoch nicht immer möglich. Für die Steuerung von Dingen wie:
+- Lenkwinkel in Fahrzeugen
+- Gelenkdrehmomente in Roboterarmen
+- Leistungsstufen in Motoren
+
+Unser Agent muss kontinuierliche Aktionen ausgeben - präzise Gleitkommazahlen anstelle von kategorischen Auswahlmöglichkeiten.
+
+## Hinzufügen kontinuierlicher Aktionen zu unserer Umgebung
+
+Ändern wir unsere Umgebung, um sowohl diskrete als auch kontinuierliche Aktionen einzubeziehen. Wir behalten unsere ursprüngliche Musterabgleichsaufgabe bei, fügen aber ein zweites Muster hinzu, bei dem wir erwarten, dass die KI die Quadratwurzel dieses neuen Wertes ausgibt.
+
+Beachten Sie, wie wir nichts außer unseren ERWARTUNGEN ändern - der Agent muss durch Versuch und Irrtum herausfinden, was wir wollen, nur geleitet durch Belohnungssignale!
+
+Fügen Sie zunächst neue Felder hinzu, um das zweite Muster und die kontinuierliche Aktion in `PatternMatchingEnvironment.cs` zu verfolgen:
+
+```csharp title="PatternMatchingEnvironment.cs" ins="private int pattern2 = 0;" ins="private float aicontinuousChoice = 0f;"
+private int pattern = 0;
+private int pattern2 = 0;
+private int aiChoice = 0;
+private float aicontinuousChoice = 0f;
+private bool roundFinished = false;
+```
+
+Fügen Sie als Nächstes eine zweite Beobachtungsmethode und unsere kontinuierliche Aktionsmethode hinzu:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixObservation]
+public float SeePattern() => pattern;
+
+[RLMatrixObservation]
+public float SeePattern2() => pattern2;
+
+[RLMatrixActionContinuous]
+public void MakeChoiceContinuous(float input)
+{
+    aicontinuousChoice = input;
+}
+```
+
+Jetzt erstellen wir unsere Belohnungsfunktionen:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float GiveReward() => aiChoice == pattern ? 1.0f : -1.0f;
+
+// Füge +2 Belohnung hinzu, wenn die kontinuierliche Ausgabe der KI nahe an der Quadratwurzel
+// des zweiten Musters liegt
+[RLMatrixReward]
+public float ExtraRewards() => Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2)) < 0.1f ? 2f : 0.0f;
+```
+
+Schließlich müssen wir unsere `StartNewRound`-Methode aktualisieren, um beide Muster zu generieren:
+
+```csharp title="PatternMatchingEnvironment.cs" ins="pattern2 = Random.Shared.Next(10);"
+[RLMatrixReset]
+public void StartNewRound()
+{
+    pattern = Random.Shared.Next(2);
+    pattern2 = Random.Shared.Next(10);
+    aiChoice = 0;
+    roundFinished = false;
+}
+```
+
+Beachten Sie, dass wir einen Bereich von 0-9 für pattern2 verwenden, was unserem Agenten eine interessantere Herausforderung bietet, verschiedene Quadratwurzeln vorherzusagen.
+
+## Beheben von Kompilierungsfehlern
+
+Wenn Sie versuchen, die Lösung zu erstellen, werden Sie auf eine Reihe von Fehlern stoßen. Dies ist tatsächlich hilfreich - RLMatrix verwendet starke Typisierung, um Laufzeitfehler zu verhindern und Sie zur korrekten Implementierung für kontinuierliche Aktionen zu führen.
+
+### Fehler 1: Umgebungstyp stimmt nicht überein
+
+```
+Argument 1: cannot convert from 'PatternMatchingExample.PatternMatchingEnvironment' to 'RLMatrix.IEnvironmentAsync<float[]>'
+```
+
+Dies tritt auf, weil RLMatrix unterschiedliche Schnittstellen für kontinuierliche und diskrete Umgebungen hat, um Typsicherheit zu gewährleisten. Aktualisieren wir unseren Code in `Program.cs`:
+
+```diff lang="csharp" title="Program.cs - Environment Type"
+-var env = new List<IEnvironmentAsync<float[]>> {
++var env = new List<IContinuousEnvironmentAsync<float[]>> {
+    environment,
+    //new PatternMatchingEnvironment().RLInit() //you can add more than one to train in parallel
+};
+```
+
+### Fehler 2: Agententyp stimmt nicht überein
+
+Nach dieser Änderung erhalten wir einen zweiten Fehler:
+
+```
+Argument 2: cannot convert from 'System.Collections.Generic.List<RLMatrix.IContinuousEnvironmentAsync<float[]>>' to 'System.Collections.Generic.IEnumerable<RLMatrix.IEnvironmentAsync<float[]>>'
+```
+
+Das liegt daran, dass wir versuchen, einen diskreten Agenten mit einer kontinuierlichen Umgebung zu verwenden. Wir müssen den Agententyp ändern:
+
+```diff lang="csharp" title="Program.cs - Agent Type"
+-var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
++var agent = new LocalContinuousRolloutAgent<float[]>(learningSetup, env);
+```
+
+### Fehler 3: Algorithmusoptionen stimmen nicht überein
+
+Dies führt zu unserem dritten Fehler:
+
+```
+Argument 1: cannot convert from 'RLMatrix.DQNAgentOptions' to 'RLMatrix.PPOAgentOptions'
+```
+
+Dieser letzte Fehler zeigt, dass DQN mit kontinuierlichen Aktionen nicht kompatibel ist. Wir müssen zu PPO (Proximal Policy Optimization) wechseln, das sowohl diskrete als auch kontinuierliche Aktionsräume handhaben kann:
+
+```diff lang="csharp" title="Program.cs - Algorithm Options"
+-var learningSetup = new DQNAgentOptions(
+-    batchSize: 32,      
+-    memorySize: 1000,   
+-    gamma: 0.99f,      
+-    epsStart: 1f,     
+-    epsEnd: 0.05f,      
+-    epsDecay: 150f      
+-);
++var learningSetup = new PPOAgentOptions(
++    batchSize: 128,
++    memorySize: 1000,
++    gamma: 0.99f,
++    width: 128,
++    lr: 1E-03f
++);
+```
+
+:::note[DQN vs PPO]
+DQN ist speziell für diskrete Aktionsräume konzipiert und verfügt über keinen Mechanismus zur Verarbeitung kontinuierlicher Ausgaben. PPO hingegen ist ein Actor-Critic-Algorithmus, der diskrete Aktionen, kontinuierliche Aktionen oder beides gleichzeitig verarbeiten kann.
+
+Jeder Algorithmus hat seine Stärken - DQN kann für diskrete Probleme sehr beispieleffizient sein, während PPO komplexe Umgebungen oft robuster bewältigt. RLMatrix bietet beides, sodass Sie basierend auf Ihren spezifischen Anforderungen wählen können.
+:::
+
+
+
+## Unser erster Trainingslauf
+
+Führen wir nun das Training durch und sehen, was passiert:
+
+```bash title="Training Output"
+Step 800/1000 - Last 50 steps accuracy: 42.0%
+Press Enter to continue...
+
+Step 850/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 37.0%
+Press Enter to continue...
+```
+
+Überraschung! Die KI lernt kaum etwas. Die Genauigkeit kommt nicht über 50%, und wenn wir das Dashboard untersuchen, sehen wir, dass sie regelmäßig +1 Belohnungen für diskrete Aktionen (Musterabgleich) sammelt, aber selten die +2 Belohnungen für kontinuierliche Aktionen (Vorhersage von √pattern2) erhält.
+
+## Warum passiert das?
+
+Fragen Sie sich: Warum lernt die KI den Abgleich der diskreten Aktion so viel leichter als die kontinuierliche?
+
+Ihr erster Instinkt könnte die Lernrate (`lr`) sein - vielleicht ist sie zu niedrig? Versuchen wir, sie auf `1E-02f` zu ändern und das Training erneut durchzuführen...
+
+Hat das geholfen? Wahrscheinlich nicht. Tatsächlich könnten Sie bemerken, dass der Agent zwar die diskrete Aktion schneller lernt, aber den kontinuierlichen Aktionsraum kaum erkundet, und die Genauigkeit wird sogar schlechter, wenn das Training fortschreitet.
+
+Was passiert also wirklich?
+
+:::caution[Die grundlegende Herausforderung]
+Die Wahrscheinlichkeit, dass die KI durch zufällige Erkundung die kontinuierliche Aktion genau richtig trifft, ist verschwindend gering.
+
+Denken Sie darüber nach:
+- Bei diskreten Auswahlmöglichkeiten (0 oder 1) gibt zufälliges Raten eine 50% Chance, richtig zu liegen
+- Bei kontinuierlichen Werten, wie hoch sind die Chancen, zufällig auszugeben:
+- √0 = 0 wenn pattern2 = 0
+- √1 = 1 wenn pattern2 = 1
+- √2 ≈ 1.414 wenn pattern2 = 2
+- √3 ≈ 1.732 wenn pattern2 = 3
+- ...und so weiter bis √9 = 3
+
+Dies erzeugt ein Problem mit spärlichen Belohnungen - der Agent stolpert selten durch Zufall über die richtige Aktion, sodass er wenig nützliches Feedback erhält, von dem er lernen kann.
+:::
+
+## Hinzufügen eines Leitsignals
+
+Versuchen wir, dies zu beheben, indem wir ein hilfreicheres Belohnungssignal bereitstellen. Wir fügen eine Belohnung hinzu, die zunimmt, wenn der Agent näher an der richtigen Quadratwurzel liegt, anstatt nur exakte Übereinstimmungen zu belohnen:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float ExtraSupportingReward() => 0.5f / (1 + Math.Abs(aicontinuousChoice - (float)Math.Sqrt(pattern2)));
+
+//Vergessen Sie nicht, Ihre lr zurück auf 1E-03f zu setzen!
+```
+
+Diese Belohnungsfunktion erzeugt einen Gradienten - ein kontinuierliches Signal, das stärker wird, wenn sich der Agent dem richtigen Wert nähert. Selbst wenn er nicht genau richtig liegt, erhält er Feedback darüber, ob er "wärmer" oder "kälter" wird.
+
+:::tip[Belohnungstechnik]
+Dies veranschaulicht ein kritisches Prinzip im Reinforcement Learning, das als **Reward Shaping** (Belohnungsformung) bezeichnet wird:
+
+- **Spärliche Belohnungen** (Alles-oder-Nichts) machen das Lernen in kontinuierlichen Räumen nahezu unmöglich
+- **Dichte/geformte Belohnungen** erzeugen einen Gradienten, der den Lernprozess leitet
+- Selbst ein kleines Signal über "wärmer werden" kann den Unterschied zwischen Lernen in Stunden vs. niemals Lernen ausmachen
+
+Stellen Sie sich vor, einer Person mit verbundenen Augen zu helfen, den Weg durch einen Raum zu finden:
+- Spärliche Belohnung: "Du hast die Tür erreicht" (aber sonst Stille)
+- Geformte Belohnung: "Wärmer... wärmer... kälter... wieder wärmer..."
+
+Der zweite Ansatz führt viel zuverlässiger zum Erfolg. Dies ist besonders entscheidend für kontinuierliche Steuerungsprobleme, bei denen der Agent präzise Werte entdecken muss.
+:::
+
+Führen wir das Training mit dieser Änderung erneut durch und sehen, was passiert:
+
+```bash title="Training Output"
+Step 850/1000 - Last 50 steps accuracy: 35.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 47.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 36.0%
+Press Enter to continue...
+```
+
+Wir sehen einige kleine Verbesserungen, aber es ist immer noch nicht großartig. Das Dashboard könnte Hinweise darauf zeigen, dass das Lernen voranschreitet, aber es ist klar, dass wir für diese komplexere Aufgabe mehr Trainingszeit benötigen.
+
+## Verlängerung der Trainingszeit
+
+Für komplexere Herausforderungen wie die Vorhersage kontinuierlicher Aktionen benötigen wir oft mehr Trainingsschritte. Ändern wir unser Programm, um 10.000 statt 1.000 Schritte zu trainieren:
+
+```csharp title="Program.cs" {1,5}
+for (int i = 0; i < 10000; i++)
+{
+    await agent.Step();
+
+    if ((i + 1) % 500 == 0)
+    {
+        Console.WriteLine($"Step {i + 1}/10000 - Last 500 steps accuracy: {environment.RecentAccuracy:F1}%");
+        environment.ResetStats();
+        
+        Console.WriteLine("\nPress Enter to continue...");
+        Console.ReadLine();
+    }
+}
+```
+
+## Experiment: Auswirkung der Lernrate
+
+Während Sie den längeren Trainingsfortschritt beobachten, experimentieren Sie mit verschiedenen Lernraten. Was passiert, wenn Sie sie noch weiter senken? Was, wenn Sie sie deutlich erhöhen?
+
+In meinen Experimenten führt das Festlegen einer sehr hohen Lernrate dazu, dass das Modell stecken bleibt und nur die +1 Belohnungen für diskrete Aktionen sammelt, während es den kontinuierlichen Raum völlig unzureichend erkundet.
+
+:::tip[Erkenntnisse zur Lernrate]
+Besonders bei PPO ist die Erhöhung der Lernrate nicht immer besser für die Erkundung:
+
+- **Zu hoch**: Der Agent fixiert sich schnell auf alle Strategien, die er zuerst gefunden hat, und ignoriert oft die schwerer zu entdeckenden kontinuierlichen Aktionsmuster
+- **Zu niedrig**: Lernen geschieht schmerzlich langsam, erkundet aber gründlicher
+- **Genau richtig**: Balanciert Erkundung und Ausnutzung angemessen für Ihre Aufgabe
+
+Diese kontraintuitive Beziehung zwischen Lernrate und Erkundungsqualität ist besonders wichtig, wenn mit kontinuierlichen Aktionsräumen gearbeitet wird.
+:::
+
+## Wichtige Erkenntnisse
+
+Durch diese Übung haben wir mehrere wichtige Lektionen gelernt:
+
+1. **Kontinuierliche Aktionen sind von Natur aus schwerer zu lernen** als diskrete, aufgrund des Problems der spärlichen Belohnungen. Wenn möglich, diskretisieren Sie Ihren Aktionsraum!
+
+2. **Belohnungstechnik ist enorm wichtig** für kontinuierliche Steuerungsprobleme. Das Bereitstellen eines Signals über "wärmer werden" verwandelt eine unmögliche Lernaufgabe in eine lösbare.
+
+3. **Komplexe Aufgaben erfordern mehr Trainingszeit**. Wenn wir Dimensionen zu unserem Aktionsraum hinzufügen, müssen wir die Trainingsdauer entsprechend skalieren.
+
+4. **Algorithmusauswahl ist entscheidend**. DQN kann kontinuierliche Aktionen überhaupt nicht handhaben, während PPO diskrete, kontinuierliche oder gemischte Aktionsräume bewältigen kann.
+
+5. **Die Abstimmung der Lernrate ist delikat**, besonders bei PPO. Höher ist nicht immer besser und kann manchmal für die Erkundung schlechter sein.
+
+Diese Prinzipien werden Ihnen gute Dienste leisten, wenn Sie komplexere Reinforcement-Learning-Herausforderungen mit RLMatrix bewältigen.
+
+## Testen Sie Ihr Verständnis
+
+<Quiz
+    title="Kontinuierliche Aktionen verstehen"
+    questions={[
+        {
+            question: "Warum ist es für einen Agenten so viel schwieriger, kontinuierliche Aktionen im Vergleich zu diskreten Aktionen zu lernen?",
+            options: [
+                {
+                    text: "Kontinuierliche Aktionen erfordern mehr Rechenressourcen aufgrund der Komplexität der Berechnungen neuronaler Netzwerke",
+                    correct: false,
+                    explanation: "Obwohl kontinuierliche Aktionsräume komplexere neuronale Netzwerke benötigen könnten, ist dies nicht der grundlegende Grund für die Lernschwierigkeit. Die Kernherausforderung ist viel grundlegender für das Explorations-Exploitations-Problem im Reinforcement Learning."
+                },
+                {
+                    text: "Die Wahrscheinlichkeit, den richtigen kontinuierlichen Wert durch zufällige Erkundung zu finden, ist im Vergleich zur Auswahl aus einer kleinen Menge diskreter Optionen verschwindend gering",
+                    correct: true,
+                    explanation: "Genau richtig! Dies ist das Problem der spärlichen Belohnungen. Bei zufälliger Erkundung hat ein Agent vielleicht eine 50% Chance, eine diskrete binäre Wahl richtig zu treffen, aber genau √2 ≈ 1.414... aus allen möglichen Gleitkommawerten zu finden, ist durch reinen Zufall praktisch unmöglich. Dies macht anfängliche Lernsignale ohne ordnungsgemäßes Reward Shaping extrem selten."
+                },
+                {
+                    text: "PPO-Algorithmen sind von Natur aus weniger effizient als DQN-Algorithmen für alle Arten von Lernaufgaben",
+                    correct: false,
+                    explanation: "Das ist nicht korrekt. PPO und DQN haben verschiedene Stärken - DQN kann für diskrete Probleme beispieleffizienter sein, während PPO vielseitiger ist und kontinuierliche Aktionsräume handhaben kann, was DQN grundsätzlich nicht kann. Keines ist universell besser als das andere."
+                }
+            ],
+            hint: "Denken Sie darüber nach, was passiert, wenn ein Agent zu Beginn des Trainings zufällig erkundet. Wie hoch sind die Chancen, dass er in jedem Fall die richtige Aktion findet?"
+        },
+        {
+            question: "Welche Schlüsseltechnik hat unser Problem des Lernens kontinuierlicher Aktionen von nahezu unmöglich zu lösbar transformiert?",
+            options: [
+                {
+                    text: "Erhöhung der Anzahl der Trainingsschritte von 1.000 auf 10.000",
+                    correct: false,
+                    explanation: "Obwohl mehr Trainingszeit wichtig ist, würde sie allein das grundlegende Problem der spärlichen Belohnungen nicht lösen. Unser Agent würde ohne die wichtigere Änderung, die wir vorgenommen haben, immer noch Schwierigkeiten beim Lernen haben."
+                },
+                {
+                    text: "Wechsel vom DQN- zum PPO-Algorithmus",
+                    correct: false,
+                    explanation: "Diese Änderung war notwendig (da DQN kontinuierliche Aktionen überhaupt nicht handhaben kann), aber sie war nicht ausreichend. Selbst mit PPO hatte unser Agent anfänglich Schwierigkeiten mit dem spärlichen Belohnungssignal."
+                },
+                {
+                    text: "Hinzufügen einer geformten Belohnungsfunktion, die Feedback basierend darauf gibt, wie nahe der Agent am richtigen Wert ist",
+                    correct: true,
+                    explanation: "Genau! Dies ist Reward Shaping in Aktion. Durch das Hinzufügen der ExtraSupportingReward-Funktion, die 0.5f / (1 + Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2))) zurückgibt, haben wir einen Gradienten erstellt, der nützliche Lernsignale liefert, selbst wenn der Agent nicht genau richtig liegt. Dies ist wie das Geben von 'wärmer/kälter'-Feedback anstelle von Stille, bis das exakte Ziel gefunden wird."
+                }
+            ],
+            hint: "Überlegen Sie, welche Änderung die grundlegende Herausforderung spärlicher Belohnungen in kontinuierlichen Aktionsräumen anging."
+        },
+        {
+            question: "Welche kontraintuitive Beziehung haben wir bezüglich der Lernrate in PPO für kontinuierliche Aktionsaufgaben beobachtet?",
+            options: [
+                {
+                    text: "Höhere Lernraten veranlassten den Agenten, sich nur auf einfachere diskrete Belohnungen zu konzentrieren und kontinuierliche Aktionen zu vernachlässigen",
+                    correct: true,
+                    explanation: "Das stimmt! Wir haben beobachtet, dass bei sehr hohen Lernraten der Agent schnell das diskrete Aktionsmuster (+1 Belohnung) lernte und sich dann darauf fixierte, wobei er den kontinuierlichen Aktionsraum, der die +2 Belohnung bietet, aber schwerer zu entdecken ist, effektiv ignorierte. Dies zeigt, wie die Lernrate die Balance zwischen Erkundung und Ausnutzung beeinflusst."
+                },
+                {
+                    text: "Niedrigere Lernraten führten immer zu schnellerer Konvergenz zu optimalen Richtlinien",
+                    correct: false,
+                    explanation: "Dies ist das Gegenteil von dem, was wir beobachtet haben. Niedrigere Lernraten führten tatsächlich zu insgesamt langsamerem Lernen, aber manchmal zu besserer Erkundung des kontinuierlichen Aktionsraums. Es gilt eine heikle Balance zu finden."
+                },
+                {
+                    text: "Die Lernrate hatte keinen bedeutenden Einfluss auf das Trainingsergebnis",
+                    correct: false,
+                    explanation: "Die Lernrate hatte einen erheblichen Einfluss auf die Trainingsergebnisse. Sie beeinflusste sowohl die Lerngeschwindigkeit als auch, noch wichtiger, die Balance zwischen Erkundung und Ausnutzung, insbesondere in Bezug darauf, wie der Agent die einfacheren diskreten Belohnungen gegenüber den schwerer zu entdeckenden kontinuierlichen Aktionsmustern priorisierte."
+                }
+            ],
+            hint: "Erinnern Sie sich daran, was passierte, als wir mit verschiedenen Lernraten experimentierten und wie es die Fähigkeit des Agenten beeinflusste, beide Arten von Belohnungen zu entdecken."
+        },
+        {
+            question: "Wenn Sie ein Robotersteuerungssystem entwerfen würden, das sowohl bestimmen muss, WELCHE Taste zu drücken ist (aus 4 Tasten) ALS AUCH wie viel Druck auszuüben ist (0-100%), welcher Ansatz wäre basierend auf dieser Lektion am effektivsten?",
+            options: [
+                {
+                    text: "Verwenden Sie DQN wegen seiner Effizienz und diskretisieren Sie den Druck in 10 Stufen (0%, 10%, 20% usw.)",
+                    correct: true,
+                    explanation: "Ausgezeichnete Wahl! Dies folgt dem Schlüsselprinzip aus dem Tutorial: 'Wenn Sie Ihre Aktionsräume DISKRETISIEREN können, tun Sie es!' Durch die Umwandlung des Drucks in 10 diskrete Stufen haben wir ein schwieriges kontinuierliches Problem in ein handhabbares diskretes mit nur 40 Gesamtaktionen (4 Tasten × 10 Druckstufen) umgewandelt. DQN wird diesen diskretisierten Raum viel effizienter lernen als mit kontinuierlichen Werten zu kämpfen."
+                },
+                {
+                    text: "Verwenden Sie PPO mit seinen Standardeinstellungen und lassen Sie es beide Aspekte gleichzeitig herausfinden",
+                    correct: false,
+                    explanation: "Obwohl PPO gemischte Aktionsräume handhaben kann, würde die bloße Verwendung mit Standardeinstellungen wahrscheinlich zu suboptimalem Lernen führen. Die Lektion hat uns gezeigt, dass kontinuierliche Aktionen von Natur aus schwer durch zufällige Erkundung zu lernen sind. Ohne Diskretisierung oder sorgfältiges Reward Shaping wäre das Lernen ineffizient."
+                },
+                {
+                    text: "Verwenden Sie PPO mit geformten Belohnungen, die Gradientenfeedback zur Druckgenauigkeit bieten, und behandeln Sie Druck als echten kontinuierlichen Wert",
+                    correct: false,
+                    explanation: "Obwohl dieser Ansatz letztendlich funktionieren könnte, ignoriert er die Schlüsselerkenntnis des Tutorials, dass die Diskretisierung von Aktionen, wenn möglich, zu schnellerem, zuverlässigerem Lernen führt. Die Behandlung des Drucks als kontinuierlichen Wert schafft ein unnötig schwieriges Lernproblem, wenn die Diskretisierung in 10 Stufen für die Aufgabe wahrscheinlich ausreichend wäre."
+                }
+            ],
+            hint: "Denken Sie an die starke Empfehlung des Tutorials zur Diskretisierung von Aktionsräumen, wenn möglich, und überlegen Sie, welcher Ansatz das Lernproblem am meisten vereinfacht."
+        },
+        {
+            question: "Basierend auf den Mustern, die wir gesehen haben, welches Szenario wäre wahrscheinlich die GRÖSSTE Herausforderung für einen Reinforcement-Learning-Agenten?",
+            options: [
+                {
+                    text: "Lernen, eine von drei vordefinierten Routen durch ein Labyrinth zu wählen",
+                    correct: false,
+                    explanation: "Dies ist ein einfaches diskretes Aktionsproblem mit nur drei Optionen. Basierend auf unserer Lektion sind diskrete Aktionsräume mit wenigen Optionen am einfachsten für Reinforcement-Learning-Agenten effektiv zu erkunden."
+                },
+                {
+                    text: "Lernen, die Temperatur eines Systems präzise auf genau 37.85°C mit minimaler Schwankung einzustellen",
+                    correct: true,
+                    explanation: "Dies ist tatsächlich das herausforderndste Szenario! Es geht darum, einen extrem präzisen kontinuierlichen Wert (genau 37.85°C) zu finden und mit minimaler Abweichung zu halten. Ohne ordnungsgemäß geformte Belohnungen würde der Agent Schwierigkeiten haben, diesen präzisen Sollwert durch zufällige Erkundung zu entdecken, was genau die Art von Problem mit spärlichen Belohnungen ist, das wir diskutiert haben."
+                },
+                {
+                    text: "Lernen, 10 verschiedene Arten von Objekten basierend auf visueller Eingabe zu erkennen und zu sortieren",
+                    correct: false,
+                    explanation: "Obwohl dies mehr diskrete Optionen (10 Kategorien) beinhaltet, ist es immer noch grundsätzlich ein diskretes Klassifikationsproblem. Der Agent erhält klares Feedback darüber, ob er richtig klassifiziert hat oder nicht, und vermeidet so die Herausforderung spärlicher Belohnungen kontinuierlicher Aktionsräume."
+                }
+            ],
+            hint: "Überlegen Sie, welches Szenario dem Finden einer Nadel im Heuhaufen in Bezug auf die Erkundung des Aktionsraums ähnelt."
+        }
+    ]}
+/>
+
+## Nächste Schritte
+
+Jetzt, da Sie die Herausforderungen kontinuierlicher Aktionsräume verstehen und wissen, wie Sie sie angehen können, sind Sie bereit, ein klassisches Reinforcement-Learning-Problem mit komplexeren Beobachtungen zu versuchen.
+
+<LinkCard
+    title="Cart-Pole Beispiel"
+    description="Lernen Sie, wie man eine Stange auf einem beweglichen Wagen mit Reinforcement Learning balanciert."
+    href="/beginner/cartpole/"
+/>

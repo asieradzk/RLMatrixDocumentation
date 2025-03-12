@@ -1,0 +1,422 @@
+---
+title: Làm Việc Với Hành Động Liên Tục
+description: Giới thiệu về hành động liên tục trong RLMatrix và học tăng cường.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+import Quiz from '@/components/Quiz.astro';
+
+Hãy bắt đầu với dự án từ [hướng dẫn trước](/beginner/gettingstarted/) của chúng ta và thêm hành động liên tục vào nó. Bạn có thể theo dõi bằng cách sử dụng [dự án khởi động](https://github.com/asieradzk/RLMatrixGettingStartedExample1) hoặc kiểm tra [dự án hoàn chỉnh](https://github.com/asieradzk/RLMatrixGettingStartedExample2_ContinuousActions) nếu bạn thích.
+
+## Hành Động Rời Rạc và Liên Tục
+
+Trong hướng dẫn trước, chúng ta đã làm việc với hành động rời rạc - tác nhân của chúng ta phải chọn giữa một tập hợp hữu hạn các tùy chọn (0 hoặc 1) để khớp với một mẫu. Trong các tình huống thực tế, chúng ta có thể nhận được nhiều dữ liệu cảm biến và đầu vào hình ảnh để quyết định nút nào cần nhấn.
+
+:::tip[Tương Lai Hóa Dự Án Của Bạn]
+Nếu bạn có thể RỜI RẠC HÓA không gian hành động của mình để các quyết định có thể được đơn giản hóa thành một số hữu hạn các lần nhấn nút (hành động rời rạc), hãy làm điều đó! Điều này làm cho tín hiệu học tập trở nên rõ ràng hơn và đẩy nhanh quá trình đào tạo đáng kể, như chúng ta sẽ chứng kiến trực tiếp trong hướng dẫn này.
+:::
+
+Tuy nhiên, trong nhiều ứng dụng thế giới thực, điều này không phải lúc nào cũng khả thi. Để điều khiển những thứ như:
+- Góc lái trong phương tiện
+- Mô-men xoắn khớp nối trong cánh tay robot
+- Mức công suất trong động cơ
+
+Tác nhân của chúng ta sẽ cần đưa ra hành động liên tục—giá trị dấu phẩy động chính xác thay vì lựa chọn phân loại.
+
+## Thêm Hành Động Liên Tục Vào Môi Trường Của Chúng Ta
+
+Hãy sửa đổi môi trường của chúng ta để bao gồm cả hành động rời rạc và liên tục. Chúng ta sẽ giữ nguyên nhiệm vụ khớp mẫu ban đầu nhưng thêm một mẫu thứ hai, trong đó chúng ta mong đợi AI xuất ra căn bậc hai của giá trị mới này.
+
+Lưu ý cách chúng ta không thay đổi gì ngoại trừ KỲ VỌNG của chúng ta—tác nhân sẽ cần tìm ra điều chúng ta muốn thông qua thử và sai, chỉ được hướng dẫn bởi tín hiệu phần thưởng!
+
+Đầu tiên, thêm các trường mới để theo dõi mẫu thứ hai và hành động liên tục trong `PatternMatchingEnvironment.cs`:
+
+```csharp title="PatternMatchingEnvironment.cs" ins="private int pattern2 = 0;" ins="private float aicontinuousChoice = 0f;"
+private int pattern = 0;
+private int pattern2 = 0;
+private int aiChoice = 0;
+private float aicontinuousChoice = 0f;
+private bool roundFinished = false;
+```
+
+Tiếp theo, thêm phương thức quan sát thứ hai và phương thức hành động liên tục của chúng ta:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixObservation]
+public float SeePattern() => pattern;
+
+[RLMatrixObservation]
+public float SeePattern2() => pattern2;
+
+[RLMatrixActionContinuous]
+public void MakeChoiceContinuous(float input)
+{
+    aicontinuousChoice = input;
+}
+```
+
+Bây giờ, hãy tạo các hàm phần thưởng của chúng ta:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float GiveReward() => aiChoice == pattern ? 1.0f : -1.0f;
+
+// Thêm phần thưởng +2 khi đầu ra liên tục của AI gần với căn bậc hai
+// của mẫu thứ hai
+[RLMatrixReward]
+public float ExtraRewards() => Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2)) < 0.1f ? 2f : 0.0f;
+```
+
+Cuối cùng, chúng ta cần cập nhật phương thức `StartNewRound` để tạo ra cả hai mẫu:
+
+```csharp title="PatternMatchingEnvironment.cs" ins="pattern2 = Random.Shared.Next(10);"
+[RLMatrixReset]
+public void StartNewRound()
+{
+    pattern = Random.Shared.Next(2);
+    pattern2 = Random.Shared.Next(10);
+    aiChoice = 0;
+    roundFinished = false;
+}
+```
+
+Lưu ý rằng chúng ta đang sử dụng phạm vi 0-9 cho pattern2, điều này tạo ra một thử thách thú vị hơn cho tác nhân của chúng ta trong việc dự đoán các căn bậc hai khác nhau.
+
+## Sửa Lỗi Biên Dịch
+
+Khi bạn cố gắng biên dịch giải pháp, bạn sẽ gặp phải một loạt lỗi. Điều này thực sự hữu ích—RLMatrix sử dụng kiểu dữ liệu mạnh để ngăn chặn lỗi runtime và hướng dẫn bạn đến cách triển khai chính xác cho hành động liên tục.
+
+### Lỗi 1: Không Khớp Loại Môi Trường
+
+```
+Argument 1: cannot convert from 'PatternMatchingExample.PatternMatchingEnvironment' to 'RLMatrix.IEnvironmentAsync<float[]>'
+```
+
+Điều này xảy ra vì RLMatrix có các giao diện khác nhau cho môi trường liên tục và rời rạc để đảm bảo tính an toàn kiểu. Hãy cập nhật mã của chúng ta trong `Program.cs`:
+
+```diff lang="csharp" title="Program.cs - Environment Type"
+-var env = new List<IEnvironmentAsync<float[]>> {
++var env = new List<IContinuousEnvironmentAsync<float[]>> {
+    environment,
+    //new PatternMatchingEnvironment().RLInit() //you can add more than one to train in parallel
+};
+```
+
+### Lỗi 2: Không Khớp Loại Tác Nhân
+
+Sau thay đổi này, chúng ta sẽ nhận được lỗi thứ hai:
+
+```
+Argument 2: cannot convert from 'System.Collections.Generic.List<RLMatrix.IContinuousEnvironmentAsync<float[]>>' to 'System.Collections.Generic.IEnumerable<RLMatrix.IEnvironmentAsync<float[]>>'
+```
+
+Điều này là do chúng ta đang cố gắng sử dụng một tác nhân rời rạc với một môi trường liên tục. Chúng ta cần thay đổi loại tác nhân:
+
+```diff lang="csharp" title="Program.cs - Agent Type"
+-var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
++var agent = new LocalContinuousRolloutAgent<float[]>(learningSetup, env);
+```
+
+### Lỗi 3: Không Khớp Tùy Chọn Thuật Toán
+
+Điều này dẫn đến lỗi thứ ba của chúng ta:
+
+```
+Argument 1: cannot convert from 'RLMatrix.DQNAgentOptions' to 'RLMatrix.PPOAgentOptions'
+```
+
+Lỗi cuối cùng này cho thấy DQN không tương thích với hành động liên tục. Chúng ta cần chuyển sang PPO (Proximal Policy Optimization), có thể xử lý cả không gian hành động rời rạc và liên tục:
+
+```diff lang="csharp" title="Program.cs - Algorithm Options"
+-var learningSetup = new DQNAgentOptions(
+-    batchSize: 32,      
+-    memorySize: 1000,   
+-    gamma: 0.99f,      
+-    epsStart: 1f,     
+-    epsEnd: 0.05f,      
+-    epsDecay: 150f      
+-);
++var learningSetup = new PPOAgentOptions(
++    batchSize: 128,
++    memorySize: 1000,
++    gamma: 0.99f,
++    width: 128,
++    lr: 1E-03f
++);
+```
+
+:::note[DQN vs PPO]
+DQN được thiết kế đặc biệt cho không gian hành động rời rạc và không có cơ chế để xử lý đầu ra liên tục. Mặt khác, PPO là một thuật toán actor-critic có thể xử lý hành động rời rạc, hành động liên tục hoặc cả hai đồng thời.
+
+Mỗi thuật toán có điểm mạnh riêng—DQN có thể rất hiệu quả về mẫu cho các vấn đề rời rạc, trong khi PPO thường xử lý môi trường phức tạp mạnh mẽ hơn. RLMatrix cung cấp cả hai, vì vậy bạn có thể chọn dựa trên nhu cầu cụ thể của mình.
+:::
+
+
+
+## Lần Đào Tạo Đầu Tiên Của Chúng Ta
+
+Bây giờ hãy chạy đào tạo và xem điều gì xảy ra:
+
+```bash title="Training Output"
+Step 800/1000 - Last 50 steps accuracy: 42.0%
+Press Enter to continue...
+
+Step 850/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 37.0%
+Press Enter to continue...
+```
+
+Bất ngờ! AI hầu như không học được gì. Độ chính xác không vượt quá 50%, và nếu chúng ta kiểm tra bảng điều khiển, chúng ta thấy nó thường xuyên thu thập phần thưởng +1 cho hành động rời rạc (khớp mẫu) nhưng hiếm khi nhận được phần thưởng +2 cho hành động liên tục (dự đoán √pattern2).
+
+## Tại Sao Điều Này Xảy Ra?
+
+Hãy tự hỏi: Tại sao AI học khớp hành động rời rạc dễ dàng hơn nhiều so với hành động liên tục?
+
+Bản năng đầu tiên của bạn có thể là tốc độ học tập (`lr`)—có lẽ nó quá thấp? Hãy thử thay đổi nó thành `1E-02f` và chạy lại đào tạo...
+
+Điều đó có giúp ích không? Có lẽ là không. Trên thực tế, bạn có thể nhận thấy rằng mặc dù tác nhân học hành động rời rạc nhanh hơn, nó hầu như không khám phá không gian hành động liên tục, và độ chính xác thậm chí còn tệ hơn khi đào tạo tiến triển.
+
+Vậy điều gì thực sự đang xảy ra?
+
+:::caution[Thách Thức Cơ Bản]
+Khả năng AI đạt được hành động liên tục chính xác thông qua khám phá ngẫu nhiên là rất nhỏ.
+
+Hãy suy nghĩ về điều đó:
+- Với lựa chọn rời rạc (0 hoặc 1), đoán ngẫu nhiên cho xác suất 50% đúng
+- Với giá trị liên tục, xác suất đầu ra ngẫu nhiên là:
+- √0 = 0 khi pattern2 = 0
+- √1 = 1 khi pattern2 = 1
+- √2 ≈ 1.414 khi pattern2 = 2
+- √3 ≈ 1.732 khi pattern2 = 3
+- ...và cứ thế lên đến √9 = 3
+
+Điều này tạo ra một vấn đề phần thưởng thưa thớt—tác nhân hiếm khi tình cờ khám phá hành động chính xác, vì vậy nó nhận được rất ít phản hồi hữu ích để học hỏi.
+:::
+
+## Thêm Tín Hiệu Hướng Dẫn
+
+Hãy thử khắc phục bằng cách cung cấp tín hiệu phần thưởng hữu ích hơn. Chúng ta sẽ thêm một phần thưởng tăng lên khi tác nhân tiến gần hơn đến căn bậc hai chính xác, thay vì chỉ thưởng cho khớp chính xác:
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float ExtraSupportingReward() => 0.5f / (1 + Math.Abs(aicontinuousChoice - (float)Math.Sqrt(pattern2)));
+
+//Đừng quên đặt lr của bạn trở lại 1E-03f!
+```
+
+Hàm phần thưởng này tạo ra một gradient—một tín hiệu liên tục trở nên mạnh hơn khi tác nhân tiếp cận giá trị chính xác. Ngay cả khi nó không chính xác, nó vẫn nhận được phản hồi về việc liệu nó có đang "ấm hơn" hay "lạnh hơn".
+
+:::tip[Kỹ Thuật Phần Thưởng]
+Điều này minh họa một nguyên tắc quan trọng trong học tăng cường được gọi là **định hình phần thưởng**:
+
+- **Phần thưởng thưa thớt** (tất cả hoặc không có gì) làm cho việc học gần như không thể trong không gian liên tục
+- **Phần thưởng dày đặc/định hình** tạo ra gradient hướng dẫn quá trình học tập
+- Ngay cả một tín hiệu nhỏ về việc "nóng lên" cũng có thể tạo ra sự khác biệt giữa việc học trong vài giờ so với không bao giờ học được
+
+Hãy tưởng tượng nó giống như giúp một người bị bịt mắt tìm đường qua phòng:
+- Phần thưởng thưa thớt: "Bạn đã đến cửa" (nhưng im lặng ngoài ra)
+- Phần thưởng định hình: "Nóng hơn... nóng hơn... lạnh hơn... nóng hơn một lần nữa..."
+
+Cách tiếp cận thứ hai dẫn đến thành công đáng tin cậy hơn nhiều. Điều này đặc biệt quan trọng đối với các vấn đề kiểm soát liên tục trong đó tác nhân cần khám phá giá trị chính xác.
+:::
+
+Hãy chạy lại đào tạo với thay đổi này và xem điều gì xảy ra:
+
+```bash title="Training Output"
+Step 850/1000 - Last 50 steps accuracy: 35.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 47.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 36.0%
+Press Enter to continue...
+```
+
+Chúng ta đang thấy một số cải thiện nhỏ, nhưng vẫn chưa tốt. Bảng điều khiển có thể cho thấy dấu hiệu rằng việc học đang tiến triển, nhưng rõ ràng, chúng ta cần thêm thời gian đào tạo cho nhiệm vụ phức tạp hơn này.
+
+## Kéo Dài Thời Gian Đào Tạo
+
+Đối với những thách thức phức tạp hơn như dự đoán hành động liên tục, chúng ta thường cần nhiều bước đào tạo hơn. Hãy sửa đổi chương trình của chúng ta để đào tạo trong 10.000 bước thay vì 1.000:
+
+```csharp title="Program.cs" {1,5}
+for (int i = 0; i < 10000; i++)
+{
+    await agent.Step();
+
+    if ((i + 1) % 500 == 0)
+    {
+        Console.WriteLine($"Step {i + 1}/10000 - Last 500 steps accuracy: {environment.RecentAccuracy:F1}%");
+        environment.ResetStats();
+        
+        Console.WriteLine("\nPress Enter to continue...");
+        Console.ReadLine();
+    }
+}
+```
+
+## Thử Nghiệm: Tác Động Của Tốc Độ Học Tập
+
+Khi bạn theo dõi tiến trình đào tạo dài hơn, hãy thử nghiệm với các tốc độ học tập khác nhau. Điều gì xảy ra nếu bạn hạ thấp nó hơn nữa? Điều gì xảy ra nếu bạn tăng nó đáng kể?
+
+Trong các thử nghiệm của tôi, việc đặt tốc độ học tập rất cao khiến mô hình bị mắc kẹt chỉ thu thập phần thưởng +1 cho hành động rời rạc trong khi hoàn toàn không khám phá đầy đủ không gian liên tục.
+
+:::tip[Hiểu Biết Về Tốc Độ Học Tập]
+Đặc biệt với PPO, việc tăng tốc độ học tập không phải lúc nào cũng tốt hơn cho việc khám phá:
+
+- **Quá cao**: Tác nhân nhanh chóng tập trung vào bất kỳ chiến lược nào nó tìm thấy đầu tiên, thường bỏ qua các mẫu hành động liên tục khó khám phá hơn
+- **Quá thấp**: Việc học diễn ra rất chậm, nhưng khám phá kỹ lưỡng hơn
+- **Vừa phải**: Cân bằng giữa khám phá và khai thác phù hợp cho nhiệm vụ của bạn
+
+Mối quan hệ trái ngược này giữa tốc độ học tập và chất lượng khám phá đặc biệt quan trọng khi làm việc với không gian hành động liên tục.
+:::
+
+## Bài Học Chính
+
+Thông qua bài tập này, chúng ta đã học được một số bài học quan trọng:
+
+1. **Hành động liên tục vốn khó học hơn** so với hành động rời rạc, do vấn đề phần thưởng thưa thớt. Khi có thể, hãy rời rạc hóa không gian hành động của bạn!
+
+2. **Kỹ thuật phần thưởng cực kỳ quan trọng** đối với các vấn đề kiểm soát liên tục. Cung cấp tín hiệu về việc "nóng lên" chuyển đổi một nhiệm vụ học tập không thể thành một nhiệm vụ có thể giải quyết được.
+
+3. **Nhiệm vụ phức tạp đòi hỏi thời gian đào tạo nhiều hơn**. Khi chúng ta thêm các chiều vào không gian hành động, chúng ta cần tăng thời gian đào tạo tương ứng.
+
+4. **Việc lựa chọn thuật toán là quan trọng**. DQN không thể xử lý hành động liên tục, trong khi PPO có thể xử lý không gian hành động rời rạc, liên tục hoặc hỗn hợp.
+
+5. **Điều chỉnh tốc độ học tập là tinh tế**, đặc biệt với PPO. Cao hơn không phải lúc nào cũng tốt hơn và đôi khi có thể tệ hơn cho việc khám phá.
+
+Những nguyên tắc này sẽ giúp ích cho bạn khi giải quyết các thách thức học tăng cường phức tạp hơn với RLMatrix.
+
+## Kiểm Tra Sự Hiểu Biết Của Bạn
+
+<Quiz
+    title="Hiểu Về Hành Động Liên Tục"
+    questions={[
+        {
+            question: "Tại sao việc học hành động liên tục khó khăn hơn nhiều đối với tác nhân so với hành động rời rạc?",
+            options: [
+                {
+                    text: "Hành động liên tục đòi hỏi nhiều tài nguyên tính toán hơn do độ phức tạp của các phép tính mạng nơ-ron",
+                    correct: false,
+                    explanation: "Mặc dù không gian hành động liên tục có thể cần mạng nơ-ron phức tạp hơn, nhưng đây không phải là lý do cơ bản cho độ khó của việc học. Thách thức cốt lõi cơ bản hơn nhiều đối với vấn đề khám phá-khai thác trong học tăng cường."
+                },
+                {
+                    text: "Xác suất khám phá ngẫu nhiên giá trị liên tục chính xác gần như vô cùng nhỏ so với việc chọn từ một tập hợp nhỏ các tùy chọn rời rạc",
+                    correct: true,
+                    explanation: "Chính xác! Đây là vấn đề phần thưởng thưa thớt. Khi khám phá ngẫu nhiên, tác nhân có khoảng 50% cơ hội đưa ra lựa chọn nhị phân rời rạc chính xác, nhưng tìm chính xác √2 ≈ 1.414... trong tất cả các giá trị dấu phẩy động có thể là gần như không thể thông qua cơ hội thuần túy. Điều này làm cho tín hiệu học tập ban đầu cực kỳ hiếm không có định hình phần thưởng thích hợp."
+                },
+                {
+                    text: "Thuật toán PPO vốn kém hiệu quả hơn thuật toán DQN cho tất cả các loại nhiệm vụ học tập",
+                    correct: false,
+                    explanation: "Điều này không chính xác. PPO và DQN có điểm mạnh khác nhau - DQN có thể hiệu quả hơn về mẫu cho các vấn đề rời rạc, trong khi PPO linh hoạt hơn và có thể xử lý không gian hành động liên tục mà DQN về cơ bản không thể. Không có thuật toán nào tốt hơn thuật toán kia một cách phổ quát."
+                }
+            ],
+            hint: "Hãy suy nghĩ về điều gì xảy ra khi tác nhân đang khám phá ngẫu nhiên vào đầu đào tạo. Khả năng tìm ra hành động chính xác trong mỗi trường hợp là gì?"
+        },
+        {
+            question: "Kỹ thuật quan trọng nào đã biến đổi vấn đề học hành động liên tục của chúng ta từ gần như không thể thành có thể giải quyết được?",
+            options: [
+                {
+                    text: "Tăng số bước đào tạo từ 1.000 lên 10.000",
+                    correct: false,
+                    explanation: "Mặc dù thời gian đào tạo nhiều hơn là quan trọng, nhưng nó không thể một mình giải quyết vấn đề phần thưởng thưa thớt cơ bản. Tác nhân của chúng ta vẫn sẽ gặp khó khăn khi học mà không có thay đổi quan trọng hơn chúng ta đã thực hiện."
+                },
+                {
+                    text: "Thay đổi từ thuật toán DQN sang PPO",
+                    correct: false,
+                    explanation: "Thay đổi này là cần thiết (vì DQN không thể xử lý hành động liên tục), nhưng nó không đủ. Ngay cả với PPO, tác nhân của chúng ta ban đầu vẫn gặp khó khăn với tín hiệu phần thưởng thưa thớt."
+                },
+                {
+                    text: "Thêm một hàm phần thưởng định hình cung cấp phản hồi dựa trên việc tác nhân gần với giá trị chính xác như thế nào",
+                    correct: true,
+                    explanation: "Chính xác! Đây là định hình phần thưởng trong hành động. Bằng cách thêm hàm ExtraSupportingReward trả về 0.5f / (1 + Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2))), chúng ta đã tạo ra một gradient cung cấp tín hiệu học tập hữu ích ngay cả khi tác nhân không chính xác. Điều này giống như đưa ra phản hồi 'nóng hơn/lạnh hơn' thay vì chỉ im lặng cho đến khi tìm thấy đúng mục tiêu."
+                }
+            ],
+            hint: "Xem xét thay đổi nào giải quyết thách thức cơ bản của phần thưởng thưa thớt trong không gian hành động liên tục."
+        },
+        {
+            question: "Mối quan hệ trái ngược nào chúng ta đã quan sát được liên quan đến tốc độ học tập trong PPO cho các nhiệm vụ hành động liên tục?",
+            options: [
+                {
+                    text: "Tốc độ học tập cao hơn khiến tác nhân chỉ tập trung vào phần thưởng rời rạc dễ dàng hơn trong khi bỏ qua hành động liên tục",
+                    correct: true,
+                    explanation: "Đúng vậy! Chúng ta đã quan sát thấy rằng với tốc độ học tập rất cao, tác nhân sẽ nhanh chóng học mẫu hành động rời rạc (phần thưởng +1) và sau đó tập trung vào điều đó, hiệu quả bỏ qua không gian hành động liên tục cung cấp phần thưởng +2 nhưng khó khám phá hơn. Điều này chứng minh cách tốc độ học tập ảnh hưởng đến sự cân bằng khám phá/khai thác."
+                },
+                {
+                    text: "Tốc độ học tập thấp hơn luôn dẫn đến hội tụ nhanh hơn vào các chính sách tối ưu",
+                    correct: false,
+                    explanation: "Điều này ngược lại với những gì chúng ta quan sát được. Tốc độ học tập thấp hơn thực sự dẫn đến việc học tổng thể chậm hơn nhưng đôi khi khám phá không gian hành động liên tục tốt hơn. Có một sự cân bằng tinh tế cần đạt được."
+                },
+                {
+                    text: "Tốc độ học tập không có tác động có ý nghĩa đến kết quả đào tạo",
+                    correct: false,
+                    explanation: "Tốc độ học tập có tác động đáng kể đến kết quả đào tạo. Nó ảnh hưởng đến cả tốc độ học tập và quan trọng hơn, sự cân bằng khám phá-khai thác, đặc biệt là về cách tác nhân ưu tiên phần thưởng rời rạc dễ dàng hơn so với các mẫu hành động liên tục khó khám phá hơn."
+                }
+            ],
+            hint: "Nhớ lại điều gì đã xảy ra khi chúng ta thử nghiệm với các tốc độ học tập khác nhau và nó ảnh hưởng như thế nào đến khả năng của tác nhân trong việc khám phá cả hai loại phần thưởng."
+        },
+        {
+            question: "Nếu bạn đang thiết kế hệ thống điều khiển robot cần xác định CẢ nút nào để nhấn (trong số 4 nút) VÀ mức áp lực cần áp dụng (0-100%), phương pháp nào sẽ hiệu quả nhất dựa trên bài học này?",
+            options: [
+                {
+                    text: "Sử dụng DQN vì tính hiệu quả của nó, và rời rạc hóa áp lực thành 10 mức (0%, 10%, 20%, v.v.)",
+                    correct: true,
+                    explanation: "Lựa chọn xuất sắc! Điều này tuân theo nguyên tắc chính từ hướng dẫn: 'Nếu bạn có thể RỜI RẠC HÓA không gian hành động của mình, hãy làm điều đó!' Bằng cách chuyển đổi áp lực thành 10 mức rời rạc, chúng ta đã biến đổi một vấn đề liên tục khó khăn thành một vấn đề rời rạc có thể quản lý với chỉ 40 hành động tổng cộng (4 nút × 10 mức áp lực). DQN sẽ học không gian rời rạc hóa này hiệu quả hơn nhiều so với việc vật lộn với các giá trị liên tục."
+                },
+                {
+                    text: "Sử dụng PPO với cài đặt mặc định và để nó tự xác định cả hai khía cạnh đồng thời",
+                    correct: false,
+                    explanation: "Mặc dù PPO có thể xử lý không gian hành động hỗn hợp, nhưng chỉ sử dụng nó với cài đặt mặc định có thể dẫn đến việc học không tối ưu. Bài học đã cho chúng ta thấy rằng hành động liên tục vốn khó học thông qua khám phá ngẫu nhiên. Không có rời rạc hóa hoặc định hình phần thưởng cẩn thận, việc học sẽ không hiệu quả."
+                },
+                {
+                    text: "Sử dụng PPO với phần thưởng định hình cung cấp phản hồi gradient về độ chính xác của áp lực, và coi áp lực như một giá trị liên tục thực sự",
+                    correct: false,
+                    explanation: "Mặc dù phương pháp này cuối cùng có thể hoạt động, nhưng nó bỏ qua hiểu biết chính từ hướng dẫn rằng việc rời rạc hóa hành động khi có thể dẫn đến việc học nhanh hơn, đáng tin cậy hơn. Việc coi áp lực như một giá trị liên tục tạo ra một vấn đề học tập không cần thiết khó khăn khi rời rạc hóa thành 10 mức có thể đã đủ cho nhiệm vụ."
+                }
+            ],
+            hint: "Hãy nhớ khuyến nghị mạnh mẽ của hướng dẫn về việc rời rạc hóa không gian hành động khi có thể, và xem xét phương pháp nào đơn giản hóa vấn đề học tập nhất."
+        },
+        {
+            question: "Dựa trên các mẫu chúng ta đã thấy, kịch bản nào có khả năng TÁC KHÓ KHĂN NHẤT cho tác nhân học tăng cường?",
+            options: [
+                {
+                    text: "Học cách chọn một trong ba tuyến đường đã định nghĩa trước thông qua mê cung",
+                    correct: false,
+                    explanation: "Đây là một vấn đề hành động rời rạc đơn giản với chỉ ba tùy chọn. Dựa trên bài học của chúng ta, không gian hành động rời rạc với ít tùy chọn là dễ dàng nhất cho tác nhân học tăng cường khám phá hiệu quả."
+                },
+                {
+                    text: "Học cách điều chỉnh nhiệt độ của hệ thống chính xác đến 37.85°C với độ dao động tối thiểu",
+                    correct: true,
+                    explanation: "Đây quả thực là kịch bản khó khăn nhất! Nó liên quan đến việc tìm một giá trị liên tục cực kỳ chính xác (chính xác 37.85°C) và duy trì nó với độ lệch tối thiểu. Không có phần thưởng được định hình đúng cách, tác nhân sẽ gặp khó khăn trong việc khám phá điểm này thông qua khám phá ngẫu nhiên, làm cho nó chính xác là loại vấn đề phần thưởng thưa thớt mà chúng ta đã thảo luận."
+                },
+                {
+                    text: "Học cách nhận dạng và phân loại 10 loại đối tượng khác nhau dựa trên đầu vào hình ảnh",
+                    correct: false,
+                    explanation: "Mặc dù điều này liên quan đến nhiều tùy chọn rời rạc hơn (10 danh mục), nhưng về cơ bản vẫn là một vấn đề phân loại rời rạc. Tác nhân nhận được phản hồi rõ ràng về việc nó phân loại đúng hay không, tránh được thách thức phần thưởng thưa thớt của không gian hành động liên tục."
+                }
+            ],
+            hint: "Hãy suy nghĩ về kịch bản nào liên quan đến việc tìm kim trong đống cỏ khô về mặt khám phá không gian hành động."
+        }
+    ]}
+/>
+
+## Bước Tiếp Theo
+
+Bây giờ bạn đã hiểu những thách thức của không gian hành động liên tục và cách giải quyết chúng, bạn đã sẵn sàng để thử một vấn đề học tăng cường cổ điển với các quan sát phức tạp hơn.
+
+<LinkCard
+    title="Ví Dụ Cart-Pole"
+    description="Học cách cân bằng một cột trên xe di chuyển bằng học tăng cường."
+    href="/beginner/cartpole/"
+/>

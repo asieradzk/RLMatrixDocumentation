@@ -1,0 +1,421 @@
+---
+title: 使用連續動作
+description: RLMatrix 和強化學習中連續動作的介紹。
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+import Quiz from '@/components/Quiz.astro';
+
+讓我們從[之前的教程](/beginner/gettingstarted/)專案開始，為其添加連續動作。您可以使用[初始專案](https://github.com/asieradzk/RLMatrixGettingStartedExample1)跟隨操作，或者如果您願意，可以查看[完整專案](https://github.com/asieradzk/RLMatrixGettingStartedExample2_ContinuousActions)。
+
+## 離散動作 vs. 連續動作
+
+在之前的指南中，我們使用了離散動作 - 我們的智能體必須在有限選項集（0 或 1）之間選擇以匹配模式。在實際場景中，我們可能會接收大量感應器數據和視覺輸入來決定按下哪個按鈕。
+
+:::tip[未雨綢繆]
+如果您能夠將動作空間離散化，使決策簡化為有限數量的按鈕按壓（離散動作），請務必這樣做！這使學習信號更加明顯，並大大加速訓練，正如我們在本教程中將親身體驗的那樣。
+:::
+
+然而，在許多現實應用中，這並不總是可能的。對於控制以下類型的事物：
+- 車輛的轉向角度
+- 機械臂的關節扭矩
+- 引擎的功率水平
+
+我們的智能體需要輸出連續動作——精確的浮點值，而非分類選擇。
+
+## 向環境添加連續動作
+
+讓我們修改環境，同時包含離散和連續動作。我們將保留原始的模式匹配任務，但添加第二個模式，我們期望 AI 輸出這個新值的平方根。
+
+注意我們只改變了期望值——智能體需要僅通過獎勵信號的引導，通過試錯來弄清楚我們想要什麼！
+
+首先，在 `PatternMatchingEnvironment.cs` 中添加新欄位以追蹤第二個模式和連續動作：
+
+```csharp title="PatternMatchingEnvironment.cs" ins="private int pattern2 = 0;" ins="private float aicontinuousChoice = 0f;"
+private int pattern = 0;
+private int pattern2 = 0;
+private int aiChoice = 0;
+private float aicontinuousChoice = 0f;
+private bool roundFinished = false;
+```
+
+接下來，添加第二個觀察方法和我們的連續動作方法：
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixObservation]
+public float SeePattern() => pattern;
+
+[RLMatrixObservation]
+public float SeePattern2() => pattern2;
+
+[RLMatrixActionContinuous]
+public void MakeChoiceContinuous(float input)
+{
+    aicontinuousChoice = input;
+}
+```
+
+現在，讓我們創建獎勵函數：
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float GiveReward() => aiChoice == pattern ? 1.0f : -1.0f;
+
+// 當 AI 的連續輸出接近第二個模式的平方根時，添加 +2 獎勵
+[RLMatrixReward]
+public float ExtraRewards() => Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2)) < 0.1f ? 2f : 0.0f;
+```
+
+最後，我們需要更新 `StartNewRound` 方法以生成兩種模式：
+
+```csharp title="PatternMatchingEnvironment.cs" ins="pattern2 = Random.Shared.Next(10);"
+[RLMatrixReset]
+public void StartNewRound()
+{
+    pattern = Random.Shared.Next(2);
+    pattern2 = Random.Shared.Next(10);
+    aiChoice = 0;
+    roundFinished = false;
+}
+```
+
+注意我們為 pattern2 使用了 0-9 的範圍，這給智能體提供了一個更有趣的挑戰：預測不同的平方根值。
+
+## 修復編譯錯誤
+
+當您嘗試構建解決方案時，您會遇到一系列錯誤。這實際上很有幫助——RLMatrix 使用強類型來防止運行時錯誤，並引導您朝著連續動作的正確實現方向前進。
+
+### 錯誤 1：環境類型不匹配
+
+```
+Argument 1: cannot convert from 'PatternMatchingExample.PatternMatchingEnvironment' to 'RLMatrix.IEnvironmentAsync<float[]>'
+```
+
+這是因為 RLMatrix 為連續和離散環境提供了不同的接口，以確保類型安全。讓我們在 `Program.cs` 中更新程式碼：
+
+```diff lang="csharp" title="Program.cs - Environment Type"
+-var env = new List<IEnvironmentAsync<float[]>> {
++var env = new List<IContinuousEnvironmentAsync<float[]>> {
+    environment,
+    //new PatternMatchingEnvironment().RLInit() //you can add more than one to train in parallel
+};
+```
+
+### 錯誤 2：智能體類型不匹配
+
+進行此更改後，我們會遇到第二個錯誤：
+
+```
+Argument 2: cannot convert from 'System.Collections.Generic.List<RLMatrix.IContinuousEnvironmentAsync<float[]>>' to 'System.Collections.Generic.IEnumerable<RLMatrix.IEnvironmentAsync<float[]>>'
+```
+
+這是因為我們試圖將離散智能體與連續環境一起使用。我們需要更改智能體類型：
+
+```diff lang="csharp" title="Program.cs - Agent Type"
+-var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
++var agent = new LocalContinuousRolloutAgent<float[]>(learningSetup, env);
+```
+
+### 錯誤 3：演算法選項不匹配
+
+這導致我們的第三個錯誤：
+
+```
+Argument 1: cannot convert from 'RLMatrix.DQNAgentOptions' to 'RLMatrix.PPOAgentOptions'
+```
+
+這個最終錯誤表明 DQN 與連續動作不兼容。我們需要切換到 PPO（近端策略優化），它可以處理離散和連續動作空間：
+
+```diff lang="csharp" title="Program.cs - Algorithm Options"
+-var learningSetup = new DQNAgentOptions(
+-    batchSize: 32,      
+-    memorySize: 1000,   
+-    gamma: 0.99f,      
+-    epsStart: 1f,     
+-    epsEnd: 0.05f,      
+-    epsDecay: 150f      
+-);
++var learningSetup = new PPOAgentOptions(
++    batchSize: 128,
++    memorySize: 1000,
++    gamma: 0.99f,
++    width: 128,
++    lr: 1E-03f
++);
+```
+
+:::note[DQN vs PPO]
+DQN 專為離散動作空間設計，沒有處理連續輸出的機制。而 PPO 則是一種 actor-critic 演算法，可以同時處理離散動作、連續動作或兩者兼而有之。
+
+每種演算法都有其優勢——DQN 對於離散問題可能非常樣本高效，而 PPO 通常更穩健地處理複雜環境。RLMatrix 提供了這兩種演算法，因此您可以根據特定需求進行選擇。
+:::
+
+
+
+## 我們的首次訓練運行
+
+現在讓我們運行訓練，看看會發生什麼：
+
+```bash title="Training Output"
+Step 800/1000 - Last 50 steps accuracy: 42.0%
+Press Enter to continue...
+
+Step 850/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 38.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 37.0%
+Press Enter to continue...
+```
+
+驚訝吧！AI 幾乎沒有學到任何東西。準確率沒有超過 50%，如果查看儀表板，我們會發現它定期獲得離散動作（匹配模式）的 +1 獎勵，但很少獲得連續動作（預測 √pattern2）的 +2 獎勵。
+
+## 為什麼會這樣？
+
+問問自己：為什麼 AI 學習離散動作比連續動作容易得多？
+
+您的第一直覺可能是學習率(`lr`)——也許太低了？讓我們嘗試將其更改為 `1E-02f` 並再次運行訓練...
+
+有幫助嗎？可能沒有。事實上，您可能會注意到，雖然智能體學習離散動作更快，但它幾乎不探索連續動作空間，隨著訓練的進行，準確率甚至變得更糟。
+
+那麼，究竟發生了什麼？
+
+:::caution[根本挑戰]
+AI 通過隨機探索恰好擊中正確連續動作的可能性微乎其微。
+
+想一想：
+- 對於離散選擇（0 或 1），隨機猜測有 50% 的機會正確
+- 對於連續值，隨機輸出以下值的幾率是多少：
+- 當 pattern2 = 0 時，√0 = 0
+- 當 pattern2 = 1 時，√1 = 1
+- 當 pattern2 = 2 時，√2 ≈ 1.414
+- 當 pattern2 = 3 時，√3 ≈ 1.732
+- ...以此類推直到 √9 = 3
+
+這造成了稀疏獎勵問題——智能體很少偶然得到正確的動作，因此幾乎沒有有用的反饋可以學習。
+:::
+
+## 添加指導信號
+
+讓我們嘗試通過提供更有幫助的獎勵信號來解決這個問題。我們將添加一個隨著智能體接近正確平方根而增加的獎勵，而不是僅獎勵精確匹配：
+
+```csharp title="PatternMatchingEnvironment.cs"
+[RLMatrixReward]
+public float ExtraSupportingReward() => 0.5f / (1 + Math.Abs(aicontinuousChoice - (float)Math.Sqrt(pattern2)));
+
+//別忘了將 lr 改回 1E-03f！
+```
+
+這個獎勵函數創建了一個梯度——隨著智能體接近正確值，信號會變得更強。即使它不完全正確，它也會得到關於是變"熱"還是變"冷"的反饋。
+
+:::tip[獎勵工程]
+這說明了強化學習中一個關鍵原則，稱為**獎勵塑造**：
+
+- **稀疏獎勵**（全有或全無）使在連續空間中的學習幾乎不可能
+- **密集/塑造的獎勵**創建了一個引導學習過程的梯度
+- 即使是關於"變熱"的微小信號也能使學習時間從無限長變為幾小時
+
+可以把它想象成幫助蒙眼的人穿過房間：
+- 稀疏獎勵："你已經到達門口"（否則一片寂靜）
+- 塑造的獎勵："熱了...更熱了...冷了...又熱了..."
+
+第二種方法更可靠地導向成功。這對於智能體需要發現精確值的連續控制問題尤為關鍵。
+:::
+
+讓我們再次運行訓練，看看會發生什麼：
+
+```bash title="Training Output"
+Step 850/1000 - Last 50 steps accuracy: 35.0%
+Press Enter to continue...
+
+Step 900/1000 - Last 50 steps accuracy: 40.0%
+Press Enter to continue...
+
+Step 950/1000 - Last 50 steps accuracy: 47.0%
+Press Enter to continue...
+
+Step 1000/1000 - Last 50 steps accuracy: 36.0%
+Press Enter to continue...
+```
+
+我們看到一些小的改進，但仍然不太理想。儀表板可能顯示學習正在進行的跡象，但顯然，對於這個更複雜的任務，我們需要更多的訓練時間。
+
+## 延長訓練時間
+
+對於連續動作預測等更複雜的挑戰，我們通常需要更多的訓練步驟。讓我們修改程序，訓練 10,000 步而不是 1,000 步：
+
+```csharp title="Program.cs" {1,5}
+for (int i = 0; i < 10000; i++)
+{
+    await agent.Step();
+
+    if ((i + 1) % 500 == 0)
+    {
+        Console.WriteLine($"Step {i + 1}/10000 - Last 500 steps accuracy: {environment.RecentAccuracy:F1}%");
+        environment.ResetStats();
+        
+        Console.WriteLine("\nPress Enter to continue...");
+        Console.ReadLine();
+    }
+}
+```
+
+## 實驗：學習率的影響
+
+在觀察更長的訓練進度時，嘗試使用不同的學習率進行實驗。如果進一步降低會發生什麼？如果顯著提高呢？
+
+在我的實驗中，設置非常高的學習率會導致模型陷入只收集離散動作的 +1 獎勵，同時完全無法充分探索連續空間。
+
+:::tip[學習率洞察]
+特別是使用 PPO 時，增加學習率並不總是對探索有利：
+
+- **太高**：智能體會快速固定在最先發現的策略上，往往忽略更難發現的連續動作模式
+- **太低**：學習進行得痛苦地慢，但探索更徹底
+- **恰到好處**：為您的任務適當地平衡探索和利用
+
+學習率與探索質量之間的這種反直覺關係在處理連續動作空間時尤為重要。
+:::
+
+## 關鍵要點
+
+通過這個練習，我們學到了幾個重要的教訓：
+
+1. **連續動作本質上比離散動作更難學習**，這是由於稀疏獎勵問題。如果可能的話，將您的動作空間離散化！
+
+2. **獎勵工程對連續控制問題至關重要**。提供關於"變熱"的信號將一個不可能的學習任務轉變為可處理的任務。
+
+3. **複雜任務需要更多訓練時間**。隨著我們向動作空間添加維度，我們需要相應地擴展訓練持續時間。
+
+4. **演算法選擇至關重要**。DQN 根本無法處理連續動作，而 PPO 可以處理離散、連續或混合動作空間。
+
+5. **學習率調整是微妙的**，特別是使用 PPO 時。更高並不總是更好，有時對探索甚至可能更糟。
+
+這些原則在您應對更複雜的 RLMatrix 強化學習挑戰時將為您提供很好的幫助。
+
+## 測試您的理解
+
+<Quiz
+    title="理解連續動作"
+    questions={[
+        {
+            question: "為什麼智能體學習連續動作比離散動作困難得多？",
+            options: [
+                {
+                    text: "連續動作由於神經網絡計算的複雜性需要更多計算資源",
+                    correct: false,
+                    explanation: "雖然連續動作空間可能需要更複雜的神經網絡，但這不是學習難度的根本原因。核心挑戰更加根本地影響強化學習中的探索-利用問題。"
+                },
+                {
+                    text: "隨機探索正確連續值的概率與從小型離散選項集中選擇相比微乎其微",
+                    correct: true,
+                    explanation: "完全正確！這就是稀疏獎勵問題的影響。隨機探索時，智能體可能有 50% 的幾率猜對離散二元選擇，但在所有可能的浮點值中找到精確的 √2 ≈ 1.414... 通過純粹的偶然幾乎是不可能的。如果沒有適當的獎勵塑造，這使得初始學習信號極其罕見。"
+                },
+                {
+                    text: "PPO 演算法天生比 DQN 演算法對所有類型的學習任務效率低",
+                    correct: false,
+                    explanation: "這不準確。PPO 和 DQN 各有優勢 - DQN 對離散問題可能更樣本高效，而 PPO 更加多功能，可以處理 DQN 根本無法處理的連續動作空間。沒有一種演算法普遍優於另一種。"
+                }
+            ],
+            hint: "思考智能體在訓練開始時隨機探索時會發生什麼。在每種情況下，它找到正確動作的幾率是多少？"
+        },
+        {
+            question: "什麼關鍵技術將我們的連續動作學習問題從幾乎不可能轉變為可行？",
+            options: [
+                {
+                    text: "將訓練步驟從 1,000 增加到 10,000",
+                    correct: false,
+                    explanation: "雖然更多訓練時間很重要，但它本身無法解決根本的稀疏獎勵問題。如果沒有我們做出的更重要改變，我們的智能體仍會努力學習。"
+                },
+                {
+                    text: "從 DQN 切換到 PPO 演算法",
+                    correct: false,
+                    explanation: "這種改變是必要的（因為 DQN 根本無法處理連續動作），但還不夠。即使有 PPO，我們的智能體最初也在稀疏獎勵信號下掙扎。"
+                },
+                {
+                    text: "添加一個塑造的獎勵函數，根據智能體接近正確值的程度提供反饋",
+                    correct: true,
+                    explanation: "正是如此！這就是獎勵塑造的實際應用。通過添加 ExtraSupportingReward 函數（返回 0.5f / (1 + Math.Abs(aicontinuousChoice - Math.Sqrt(pattern2))）），我們創建了一個梯度，即使智能體不完全正確，也能提供有用的學習信號。這就像給予'熱/冷'反饋，而不是在找到確切目標前一片寂靜。"
+                }
+            ],
+            hint: "考慮哪種變化解決了連續動作空間中稀疏獎勵的根本挑戰。"
+        },
+        {
+            question: "關於 PPO 中連續動作任務的學習率，我們觀察到了什麼反直覺的關係？",
+            options: [
+                {
+                    text: "更高的學習率導致智能體只關注更容易的離散獎勵而忽視連續動作",
+                    correct: true,
+                    explanation: "沒錯！我們觀察到，使用非常高的學習率，智能體會快速學習離散動作模式（+1 獎勵），然後固定在那上面，有效地忽略了提供 +2 獎勵但更難發現的連續動作空間。這展示了學習率如何影響探索/利用平衡。"
+                },
+                {
+                    text: "較低的學習率總是導致更快地收斂到最優策略",
+                    correct: false,
+                    explanation: "這與我們觀察到的相反。較低的學習率實際上導致整體學習速度變慢，但有時對連續動作空間的探索更好。這需要找到一個微妙的平衡。"
+                },
+                {
+                    text: "學習率對訓練結果沒有有意義的影響",
+                    correct: false,
+                    explanation: "學習率對訓練結果有重大影響。它影響了學習速度，更重要的是，探索-利用平衡，特別是關於智能體如何優先考慮更容易的離散獎勵與更難發現的連續動作模式。"
+                }
+            ],
+            hint: "回想一下我們用不同學習率實驗時發生了什麼，以及它如何影響智能體發現兩種類型獎勵的能力。"
+        },
+        {
+            question: "如果您正在設計一個機器人控制系統，需要確定按下哪個按鈕（在 4 個按鈕中選擇）以及施加多少壓力（0-100%），根據這堂課，哪種方法最有效？",
+            options: [
+                {
+                    text: "使用 DQN 因其效率，並將壓力離散化為 10 個等級（0%、10%、20% 等）",
+                    correct: true,
+                    explanation: "極佳的選擇！這遵循了教程的關鍵原則：'如果您可以離散化動作空間，就去做！'通過將壓力轉換為 10 個離散等級，我們將困難的連續問題轉變為可管理的離散問題，總共只有 40 個動作（4 個按鈕 × 10 個壓力等級）。DQN 將比努力處理連續值更有效地學習這個離散化空間。"
+                },
+                {
+                    text: "使用帶默認設置的 PPO，讓它同時解決兩個方面",
+                    correct: false,
+                    explanation: "雖然 PPO 可以處理混合動作空間，但僅使用默認設置可能導致次優學習。課程告訴我們，連續動作本質上難以通過隨機探索學習。如果沒有離散化或仔細的獎勵塑造，學習將效率低下。"
+                },
+                {
+                    text: "使用帶有塑造獎勵的 PPO，提供有關壓力準確性的梯度反饋，並將壓力視為真正的連續值",
+                    correct: false,
+                    explanation: "雖然這種方法最終可能會起作用，但它忽略了教程的關鍵見解，即在可能的情況下離散化動作會導致更快、更可靠的學習。將壓力視為連續值創造了一個不必要的困難學習問題，而將其離散化為 10 個等級對任務可能已經足夠。"
+                }
+            ],
+            hint: "記住教程關於在可能時離散化動作空間的強烈建議，並考慮哪種方法最大程度地簡化了學習問題。"
+        },
+        {
+            question: "根據我們看到的模式，哪種場景可能對強化學習智能體最具挑戰性？",
+            options: [
+                {
+                    text: "學習選擇迷宮中三條預定義路線之一",
+                    correct: false,
+                    explanation: "這是一個只有三個選項的簡單離散動作問題。根據我們的課程，具有少量選項的離散動作空間對於強化學習智能體來說是最容易有效探索的。"
+                },
+                {
+                    text: "學習將系統溫度精確調整到 37.85°C 並保持最小波動",
+                    correct: true,
+                    explanation: "這確實是最具挑戰性的場景！它涉及找到一個極其精確的連續值（恰好 37.85°C）並保持最小偏差。如果沒有適當塑造的獎勵，智能體將難以通過隨機探索發現這個精確設定點，這正是我們討論的那種稀疏獎勵問題。"
+                },
+                {
+                    text: "學習基於視覺輸入識別和分類 10 種不同類型的對象",
+                    correct: false,
+                    explanation: "雖然這涉及更多離散選項（10 個類別），但它仍然是一個基本的離散分類問題。智能體會收到關於其分類是否正確的明確反饋，避免了連續動作空間的稀疏獎勵挑戰。"
+                }
+            ],
+            hint: "思考哪種場景在動作空間探索方面如同大海撈針。"
+        }
+    ]}
+/>
+
+## 下一步
+
+現在您已經了解了連續動作空間的挑戰以及如何應對這些挑戰，您已準備好嘗試一個具有更複雜觀察的經典強化學習問題。
+
+<LinkCard
+    title="Cart-Pole 示例"
+    description="學習如何使用強化學習在移動小車上平衡桿子。"
+    href="/beginner/cartpole/"
+/>

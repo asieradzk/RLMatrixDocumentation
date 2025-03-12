@@ -1,0 +1,89 @@
+---
+title: Verwendung von TorchSharp & RLMatrix in Unity
+description: Wie man TorchSharp und RLMatrix in Unity integriert
+---
+:::caution[NICHT EMPFOHLEN]
+Viele Benutzer, mich eingeschlossen, haben seltsames und unerklärliches Verhalten von TorchSharp in Unity bemerkt. Die Leistung ist unterdurchschnittlich und das Verhalten der Garbage Collection ist unvorhersehbar.
+Wenn Sie vorhaben, RLMatrix in einer Unity-Anwendung zu verwenden, empfehlen wir die Netzwerkversion von RLMatrix zu nutzen - Sie können sie auf demselben Rechner über lokalen Socket ausführen, und die Leistung wird deutlich besser sein.
+Alternativ sollten Sie den Godot Engine in Betracht ziehen, der .NET Core unterstützt und UNGLAUBLICHE Leistung mit Shared-Memory TorchSharp und RLMatrix bietet.
+:::
+
+
+## Sie möchten WIRKLICH TorchSharp in Unity 2025 verwenden?
+
+Die TorchSharp-Mitwirkenden könnten dies wahrscheinlich viel besser erklären als ich - aber im Wesentlichen beinhalten die Installationsschritte das Herunterladen von libtorch-DLLs (über 1GB) und deren Installation/Referenzierung.
+
+Dies geschieht automatisch in neueren .NET Core-Versionen, aber da Unity noch nicht zu CoreCLR übergegangen ist, müssen wir viele Schritte manuell durchführen - einschließlich der NuGet-Installation.
+Ich habe bereits eine Anleitung zur effektiven Installation von NuGet-Paketen in Unity erstellt; diese kurze Anleitung erweitert sie lediglich um das manuelle Kopieren der DLLs.
+
+
+1. **Erstellen Sie die erforderlichen Ordner in Ihrem Unity-Projekt:**
+```
+Assets/Plugins/Windows/x86_64
+```
+
+2. **Installieren Sie RLMatrix mit NuGet**
+
+Laden Sie zunächst `nuget.exe` von der [NuGet-Website](https://www.nuget.org/downloads) herunter und speichern Sie sie unter `C:\nuget.exe`. Wenn Sie sie an einem anderen Ort speichern, aktualisieren Sie unbedingt den Pfad im folgenden Skript.
+
+Speichern Sie das folgende PowerShell-Skript als `install-rlmatrix.ps1` im Stammverzeichnis Ihres Unity-Projekts:
+
+```powershell
+$packageName = "RLMatrix"
+$packageVersion = "0.4.0"
+$netTarget = "netstandard2.0"
+$tempDir = ".\Temp"
+$dllDir = ".\Assets\Plugins"
+$nugetPath = "C:\nuget.exe"
+if (!(Test-Path $nugetPath)) {
+    Write-Error "NuGet.exe not found at $nugetPath. Please ensure it's installed there or update the path."
+    exit 1
+}
+if (!(Test-Path $tempDir)) {
+    New-Item -ItemType "directory" -Path $tempDir
+}
+& $nugetPath install $packageName -Version $packageVersion -OutputDirectory $tempDir
+if (!(Test-Path $dllDir)) {
+    New-Item -ItemType "directory" -Path $dllDir
+}
+Get-ChildItem -Path $tempDir -Directory | ForEach-Object {
+    $packagePath = Join-Path $_.FullName "lib\$netTarget"
+    if (Test-Path $packagePath) {
+        Get-ChildItem -Path $packagePath -Filter "*.dll" | ForEach-Object {
+            $destinationPath = Join-Path $dllDir $_.Name
+            if (!(Test-Path $destinationPath)) {
+                Copy-Item -Path $_.FullName -Destination $destinationPath
+            }
+        }
+    }
+}
+Remove-Item $tempDir -Recurse -Force
+```
+
+Weitere Details zur Funktionsweise dieses Skripts finden Sie unter: https://www.nurupo.io/posts/unityhowtonuget/
+
+3. **Führen Sie das PowerShell-Skript aus**
+
+Dies kann bequem durch Rechtsklick auf die .ps1-Datei im Windows-Explorer und Auswahl von "Mit PowerShell ausführen" erfolgen.
+
+4. **Holen Sie sich die nativen TorchSharp-DLLs**
+
+Kopieren Sie alle TorchSharp-DLLs nach `Assets/Plugins/Windows/x86_64`. Ich habe diese aus einem .NET 8.0-Projekt kopiert, das ich hatte und das TorchSharp verwendete.
+![DLL-Einstellungen im Inspector](/images/unity-torchsharp/dll-settings1.png)
+
+5. **Konfigurieren Sie die DLL-Importeinstellungen in Unity**
+
+Für jede DLL im Plugins-Ordner:
+- Wählen Sie die DLL im Unity-Projektpanel
+- Stellen Sie im Inspector sicher, dass die Einstellungen mit den folgenden übereinstimmen:
+- Setzen Sie Platform auf "Windows"
+- Setzen Sie CPU auf "x86_64"
+
+
+![DLL-Einstellungen im Inspector (Fortsetzung)](/images/unity-torchsharp/dll-settings2.png)
+
+Fertig, das sollte funktionieren!
+
+:::note
+Wenn Sie einen weniger umständlichen Weg kennen, um dies zum Laufen zu bringen, kontaktieren Sie mich bitte über den RLMatrix Discord oder GitHub.
+:::

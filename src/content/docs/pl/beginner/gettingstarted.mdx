@@ -1,0 +1,430 @@
+---
+title: Pierwsze kroki z RLMatrix
+description: Przyjazne dla początkujących wprowadzenie do uczenia przez wzmacnianie z C#.
+---
+import Quiz from '@/components/Quiz.astro';
+
+:::tip[Doświadczenie z RL?]
+Jeśli znasz już koncepcje uczenia przez wzmacnianie, sprawdź nasz [Przewodnik Szybkiego Startu](../quickstart/setup), aby szybciej rozpocząć.
+:::
+
+## Wprowadzenie
+
+Kiedy piszemy tradycyjne programy, mówimy komputerowi dokładnie, co ma robić w każdej sytuacji. Na przykład, jeśli chcielibyśmy napisać program, który dopasowuje liczby, moglibyśmy napisać:
+
+```csharp
+if (input == pattern)
+{
+    return "Poprawnie!";
+}
+else 
+{
+    return "Spróbuj ponownie!";
+}
+```
+
+Ale co jeśli chcemy, aby nasz program uczył się samodzielnie? Co jeśli reguły są zbyt złożone, aby je wszystkie wypisać, albo sami ich nie znamy? Tu właśnie wkracza uczenie przez wzmacnianie.
+
+:::note[Czym jest uczenie przez wzmacnianie?]
+<details>
+    <summary>Proste wyjaśnienie</summary>
+
+    Pomyśl, jak uczysz się grać w nową grę wideo:
+    1. Próbujesz różnych kontrolek, aby zobaczyć, co się stanie
+    2. Obserwujesz, jak gra reaguje
+    3. Zdobywasz punkty lub tracisz życia
+    4. Z czasem uczysz się, co działa najlepiej
+
+    Uczenie przez wzmacnianie działa według tego samego schematu:
+    1. AI (nazywamy go "agentem") próbuje różnych działań
+    2. Obserwuje, co dzieje się w jego środowisku
+    3. Otrzymuje nagrody lub kary
+    4. Z czasem uczy się, jakie działania działają najlepiej
+
+    Nikt nie mówi AI dokładnie, co ma robić - samo to odkrywa metodą prób i błędów.
+</details>
+:::
+
+## Konfiguracja projektu
+Możesz śledzić instrukcje lub sklonować to [repozytorium GitHub](https:/www.github.com/RLMatrix/RLMatrix-Example).
+Najpierw zainstalujmy wszystko, czego potrzebujemy:
+
+```bash title="Instalacja RLMatrix przez NuGet"
+dotnet add package RLMatrix
+dotnet add package RLMatrix.Toolkit
+```
+
+:::caution[Wymagania sprzętowe]
+RLMatrix był testowany tylko na komputerach z systemem Windows z kartą graficzną NVIDIA. Nie jest to jednak konieczne i w wielu przypadkach uczenie i wnioskowanie na CPU będzie wystarczające lub nawet szybsze.
+
+Jeśli nie masz kompatybilnej karty graficznej, możesz:
+1. Pobrać kod źródłowy z [repozytorium RLMatrix](https://github.com/asieradzk/RL_Matrix)
+2. Zmienić go, aby używał CPU zamiast GPU (szukaj `TorchSharp-cuda-windows` w pliku RLMatrix.csproj)
+3. Zbudować go samodzielnie
+:::
+
+## Twoje pierwsze środowisko uczenia
+
+Stwórzmy coś prostego, ale sensownego - środowisko, w którym nasza sztuczna inteligencja nauczy się dopasowywać wzorce. Choć wydaje się to podstawowe (i byłoby banalne do bezpośredniego zaprogramowania), wprowadza wszystkie kluczowe koncepcje, których potrzebujemy.
+
+:::note[Podstawowe elementy]
+<details>
+    <summary>Wyjaśnienie kluczowych terminów</summary>
+
+    Zanim zaczniemy, zrozummy kilka ważnych pojęć:
+
+    - **Środowisko**: Świat, w którym żyje nasza AI. Jak plansza do gry lub symulacja.
+
+    - **Stan/Obserwacja**: To, co nasza AI może zobaczyć lub wiedzieć o swoim środowisku.
+    Na przykład: Aktualny wzorzec, który trzeba dopasować.
+
+    - **Akcja**: Coś, co nasza AI może zrobić.
+    Na przykład: Wybór liczby.
+
+    - **Nagroda**: Informacja zwrotna mówiąca naszej AI, jak dobrze sobie radzi.
+    Na przykład: +1 za poprawne dopasowanie, -1 za błędne dopasowanie.
+
+    - **Epizod**: Jedna kompletna próba wykonania zadania.
+    Pomyśl o tym jak o jednej rundzie gry.
+
+</details>
+:::
+
+Oto nasze kompletne środowisko:
+
+```csharp title="PatternMatchingEnvironment.cs"
+using RLMatrix.Toolkit;
+
+namespace PatternMatchingExample;
+
+[RLMatrixEnvironment]
+public partial class PatternMatchingEnvironment
+{
+    private int pattern = 0;
+    private int aiChoice = 0;
+    private bool roundFinished = false;
+
+    // Proste liczniki dla ostatnich 50 kroków
+    private int correct = 0;
+    private int total = 0;
+
+    // Prosty sposób obliczania dokładności
+    public float RecentAccuracy => total > 0 ? (float)correct / total * 100 : 0;
+
+    [RLMatrixObservation]
+    public float SeePattern() => pattern;
+
+    [RLMatrixActionDiscrete(2)]
+    public void MakeChoice(int choice)
+    {
+        aiChoice = choice;
+        roundFinished = true;
+
+        // Aktualizacja liczników
+        total++;
+        if (aiChoice == pattern) correct++;
+    }
+
+    [RLMatrixReward]
+    public float GiveReward() => aiChoice == pattern ? 1.0f : -1.0f;
+
+    [RLMatrixDone]
+    public bool IsRoundOver() => roundFinished;
+
+    [RLMatrixReset]
+    public void StartNewRound()
+    {
+        pattern = Random.Shared.Next(2);
+        aiChoice = 0;
+        roundFinished = false;
+    }
+
+    public void ResetStats()
+    {
+        correct = 0;
+        total = 0;
+    }
+}
+```
+
+:::note[Zrozumienie kodu]
+<details>
+    <summary>Rozbicie kodu na części</summary>
+
+    Przyjrzyjmy się każdej części:
+
+    **Zmienne:**
+    ```csharp
+    private int pattern = 0;      // Liczba do dopasowania
+    private int aiChoice = 0;     // Wybór AI
+    private bool roundFinished = false;  // Status rundy
+    ```
+    Te zmienne śledzą to, co dzieje się w naszym środowisku.
+
+    **Specjalne atrybuty:**
+    - `[RLMatrixEnvironment]`: Informuje RLMatrix "to jest środowisko uczenia"
+    - `[RLMatrixObservation]`: "To jest to, co AI może zobaczyć"
+    - `[RLMatrixActionDiscrete]`: "To są wybory, których AI może dokonać"
+    - `[RLMatrixReward]`: "Tak oceniamy wydajność AI"
+    - `[RLMatrixReset]`: "Tak zaczynamy od nowa"
+
+    Toolkit wykorzystuje te atrybuty do automatycznego generowania potrzebnego kodu.
+</details>
+:::
+
+## Uczenie twojej AI
+
+Teraz nadchodzi interesująca część - nauczanie naszej AI dopasowywania wzorców. Użyjemy algorytmu nazywanego DQN (Deep Q-Network). Nie przejmuj się zbytnio nazwą - to po prostu jeden ze sposobów uczenia AI podejmowania decyzji.
+
+:::note[Opcje uczenia]
+<details>
+    <summary>Zrozumienie ustawień uczenia</summary>
+
+    Musimy skonfigurować, jak nasza AI będzie się uczyć:
+
+    - `batchSize`: Ile doświadczeń przetwarzać jednocześnie
+    Pomyśl o tym jak o analizowaniu wielu poprzednich prób razem.
+
+    - `memorySize`: Ile przeszłych doświadczeń zapamiętać
+    Jak prowadzenie notatnika tego, co działało, a co nie.
+
+    - `gamma`: Jak bardzo zależy nam na przyszłych nagrodach
+    Wyższe wartości (bliższe 1) sprawiają, że AI myśli długoterminowo.
+
+    - `epsStart` i `epsEnd`: Jak bardzo eksplorować vs wykorzystywać to, co znane
+    Jak próbowanie nowych strategii vs trzymanie się tego, co działa.
+
+    Szczegółowe wyjaśnienia wszystkich parametrów i ich wpływu znajdziesz w naszym [Przewodniku po parametrach](../../reference/hyperparameters).
+</details>
+:::
+
+Oto jak konfigurujemy uczenie:
+
+```csharp title="Program.cs"
+using RLMatrix.Agents.Common;
+using RLMatrix;
+using PatternMatchingExample;
+
+Console.WriteLine("Rozpoczynam uczenie dopasowywania wzorców...\n");
+
+// Konfiguracja sposobu uczenia naszej AI
+var learningSetup = new DQNAgentOptions(
+    batchSize: 32,      // Ucz się z 32 doświadczeń naraz
+    memorySize: 1000,   // Pamiętaj ostatnie 1000 prób
+    gamma: 0.99f,       // Dbaj mocno o przyszłe nagrody
+    epsStart: 1f,       // Zacznij próbując wszystkiego
+    epsEnd: 0.05f,      // Ostatecznie trzymaj się tego, co działa
+    epsDecay: 150f      // Jak szybko przechodzić między nimi
+);
+
+// Tworzenie naszego środowiska
+var environment = new PatternMatchingEnvironment().RLInit();
+var env = new List<IEnvironmentAsync<float[]>> { 
+    environment,
+    //new PatternMatchingEnvironment().RLInit() //możesz dodać więcej środowisk do równoległego uczenia
+};
+
+// Tworzenie naszego agenta uczącego
+var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
+
+// Pozwólmy mu się uczyć!
+for (int i = 0; i < 1000; i++)
+{
+    await agent.Step();
+
+    if ((i + 1) % 50 == 0)
+    {
+        Console.WriteLine($"Krok {i + 1}/1000 - Dokładność z ostatnich 50 kroków: {environment.RecentAccuracy:F1}%");
+        environment.ResetStats();
+        
+        Console.WriteLine("\nNaciśnij Enter, aby kontynuować...");
+        Console.ReadLine();
+    }
+}
+
+Console.WriteLine("\nUczenie zakończone!");
+Console.ReadLine();
+```
+
+Po uruchomieniu tego kodu zobaczysz postęp uczenia wyświetlany co 50 kroków:
+
+```bash title="Postęp uczenia"
+Rozpoczynam uczenie dopasowywania wzorców...
+
+Krok 50/1000 - Dokładność z ostatnich 50 kroków: 48.0%
+Naciśnij Enter, aby kontynuować...
+
+Krok 100/1000 - Dokładność z ostatnich 50 kroków: 68.0%
+Naciśnij Enter, aby kontynuować...
+
+Krok 150/1000 - Dokładność z ostatnich 50 kroków: 86.0%
+Naciśnij Enter, aby kontynuować...
+
+Krok 200/1000 - Dokładność z ostatnich 50 kroków: 82.0%
+Naciśnij Enter, aby kontynuować...
+```
+
+:::tip[Czego się spodziewać]
+Obserwując postęp uczenia, zobaczysz, jak twoja AI się doskonali:
+
+1. Około 50% dokładności na początku (losowe zgadywanie)
+2. Stale poprawiająca się dokładność w miarę uczenia
+3. Ostatecznie osiągająca 80-90% dokładności lub więcej
+
+Przerwy co 50 kroków pozwalają zaobserwować tę progresję od losowych zgadywań do umiejętnego dopasowywania. To uczenie przez wzmacnianie w akcji!
+:::
+
+## Poza prostym dopasowywaniem
+
+Choć nasz przykład jest prosty, te same zasady mają zastosowanie do znacznie bardziej złożonych problemów:
+
+:::note[Zastosowania w świecie rzeczywistym]
+<details>
+    <summary>Do czego to może prowadzić</summary>
+
+    Ta sama podstawowa struktura, której użyliśmy tutaj, skaluje się do:
+    - AI do gier
+    - Sterowania robotami
+    - Zarządzania zasobami
+    - Optymalizacji ruchu
+
+    Główna różnica dotyczy złożoności stanów i akcji, a nie fundamentalnego podejścia.
+</details>
+:::
+
+## Sprawdź swoje zrozumienie
+<Quiz
+    title="Zrozumienie podstaw uczenia przez wzmacnianie"
+    questions={[
+        {
+            question: "Dlaczego wybralibyśmy uczenie przez wzmacnianie zamiast tradycyjnego programowania dla danego zadania?",
+            options: [
+                {
+                    text: "Gdy potrzebujemy, aby program działał z ekstremalną precyzją",
+                    correct: false,
+                    explanation: "W rzeczywistości tradycyjne programowanie często doskonale sprawdza się w przypadku precyzji, gdy dokładnie wiemy, czego chcemy. Uczenie przez wzmacnianie błyszczy w scenariuszach, gdzie reguły są złożone lub nieznane, niekoniecznie gdy celem jest maksymalna precyzja."
+                },
+                {
+                    text: "Gdy reguły są zbyt złożone, aby je ręcznie zaprogramować, lub gdy sami ich w pełni nie znamy",
+                    correct: true,
+                    explanation: "Dokładnie tak! Uczenie przez wzmacnianie jest szczególnie wartościowe, gdy reguły są zbyt złożone do określenia (jak równoważenie robota) lub gdy sami nie rozumiemy w pełni optymalnego podejścia. AI może odkrywać rozwiązania poprzez doświadczenie, a nie być jawnie zaprogramowana."
+                },
+                {
+                    text: "Gdy potrzebujemy, aby program działał szybciej niż tradycyjny kod",
+                    correct: false,
+                    explanation: "Uczenie przez wzmacnianie nie dotyczy szybkości wykonania - w rzeczywistości tradycyjne programowanie zwykle działa szybciej. RL polega na tym, żeby programy uczyły się z doświadczenia, a nie były jawnie kodowane dla każdej sytuacji."
+                }
+            ],
+            hint: "Pomyśl o ograniczeniach tradycyjnego programowania if/else w porównaniu z pozwoleniem systemowi na odkrywanie wzorców metodą prób i błędów."
+        },
+        {
+            question: "W naszym przykładzie, dlaczego ważne było ustawienie epsStart na 1.0 i epsEnd na niższą wartość, jak 0.05?",
+            options: [
+                {
+                    text: "To zapewnia, że agent zawsze wybiera akcję z najwyższą nagrodą",
+                    correct: false,
+                    explanation: "To nie jest dokładnie cel. Gdyby agent zawsze wybierał to, co uważał za najlepsze (tylko eksploatacja), nigdy nie odkryłby potencjalnie lepszych strategii, których jeszcze nie wypróbował."
+                },
+                {
+                    text: "Te ustawienia kontrolują szybkość uczenia się agenta w czasie",
+                    correct: false,
+                    explanation: "Chociaż te parametry zmieniają się w czasie, nie kontrolują bezpośrednio szybkości uczenia (tym zajmuje się parametr 'lr'). Kontrolują coś innego, fundamentalnego dla uczenia przez wzmacnianie."
+                },
+                {
+                    text: "To tworzy równowagę między eksploracją (próbowaniem nowych rzeczy) a eksploatacją (używaniem tego, co działa), która zmienia się w czasie",
+                    correct: true,
+                    explanation: "Dokładnie tak! To klasyczna równowaga między eksploracją a eksploatacją. Zaczynając od epsStart: 1f, agent początkowo próbuje wszystkiego (czysta eksploracja). W miarę postępu uczenia, stopniowo przechodzi w kierunku epsEnd: 0.05f, gdzie głównie korzysta z tego, co nauczył się, że działa najlepiej (głównie eksploatacja), jednocześnie wciąż czasami eksplorując."
+                }
+            ],
+            hint: "Zastanów się, co dzieje się na początku uczenia w porównaniu z późniejszym etapem - jak zmienia się zachowanie agenta i dlaczego jest to ważne?"
+        },
+        {
+            question: "Co prawdopodobnie by się stało, gdybyśmy zmienili naszą funkcję nagrody, aby dawała tylko +1 za poprawne dopasowania, ale bez kary za niepoprawne dopasowania?",
+            options: [
+                {
+                    text: "Uczenie byłoby szybsze, ponieważ agent otrzymywałby tylko pozytywne informacje zwrotne",
+                    correct: false,
+                    explanation: "Bez kar agent uczyłby się wolniej lub wcale. Przy nagrodach tylko za trafienia, losowe zgadywanie wciąż daje nagrody w 50% przypadków, co daje niewielką motywację do poprawy ponad przypadkową szansę."
+                },
+                {
+                    text: "Uczenie byłoby wolniejsze lub nieudane, ponieważ agent nie otrzymywałby wyraźnych informacji zwrotnych o niepoprawnych działaniach",
+                    correct: true,
+                    explanation: "Dokładnie! To podkreśla znaczenie dobrze zaprojektowanych funkcji nagrody. Bez kar za niepoprawne dopasowania agent nie otrzymuje informacji zwrotnej odróżniającej złe od dobrego, gdy popełnia błąd. Może dojść do wniosku, że losowe zgadywanie jest wystarczająco dobre, skoro wciąż otrzymuje nagrody w połowie przypadków."
+                },
+                {
+                    text: "Agent nauczyłby się tego samego wzorca, ale potrzebowałby więcej pamięci do przechowywania doświadczeń",
+                    correct: false,
+                    explanation: "Wymagania dotyczące pamięci nie są bezpośrednio związane ze strukturą nagród. Kluczowym problemem jest tutaj jakość sygnałów uczenia, które agent otrzymuje, a nie to, ile pamięci wykorzystuje."
+                }
+            ],
+            hint: "Pomyśl o tym, co motywuje uczenie - czy jest to tylko otrzymywanie nagród, czy też unikanie kar?"
+        },
+        {
+            question: "Jaką rolę odgrywa gamma (ustawiona na 0.99f w naszym przykładzie) w procesie uczenia?",
+            options: [
+                {
+                    text: "Określa, ile wzorców agent może zapamiętać jednocześnie",
+                    correct: false,
+                    explanation: "Pojemność zapamiętywania wzorców jest głównie związana z architekturą sieci neuronowej, a nie z parametrem gamma. Gamma służy innemu celowi w ocenianiu nagród przez agenta."
+                },
+                {
+                    text: "Kontroluje, jak bardzo agent ceni natychmiastowe nagrody w porównaniu z potencjalnymi przyszłymi nagrodami",
+                    correct: true,
+                    explanation: "Poprawnie! Gamma to współczynnik dyskontowania, który określa, jak agent wycenia przyszłe nagrody w porównaniu z natychmiastowymi. Przy naszym wysokim ustawieniu 0.99f agent prawie tak samo ceni przyszłe nagrody jak natychmiastowe, co zachęca go do uczenia się strategii, które prowadzą do dobrych wyników w dłuższej perspektywie."
+                },
+                {
+                    text: "Ustala, jak szybko agent zapomina nieudane próby",
+                    correct: false,
+                    explanation: "Pamięć agenta o przeszłych doświadczeniach jest kontrolowana przez parametr memorySize, a nie gamma. Gamma wpływa na to, jak agent ocenia wartość działań w czasie."
+                }
+            ],
+            hint: "W bardziej złożonych środowiskach działania nie zawsze prowadzą do natychmiastowych nagród. Jak agent miałby zdecydować między małą nagrodą teraz a potencjalnie większymi nagrodami później?"
+        },
+        {
+            question: "Na podstawie tego, czego się nauczyłeś, które z tych zadań byłoby NAJBARDZIEJ odpowiednie dla podejścia z uczeniem przez wzmacnianie?",
+            options: [
+                {
+                    text: "Sortowanie listy liczb w kolejności rosnącej",
+                    correct: false,
+                    explanation: "Sortowanie to dobrze zrozumiany problem z już znanymi optymalnymi algorytmami. Tradycyjne programowanie byłoby tu bardziej odpowiednie, ponieważ dokładnie wiemy, jaki powinien być poprawny wynik dla każdego wejścia."
+                },
+                {
+                    text: "Balansowanie symulowanego robota o złożonej dynamice stawów",
+                    correct: true,
+                    explanation: "Doskonały wybór! Balansowanie robota obejmuje złożoną fizykę, którą trudno precyzyjnie modelować, z wieloma potencjalnymi strategiami utrzymania równowagi. To przykład, gdzie RL błyszczy - gdy reguły są złożone, a optymalna polityka nie jest oczywista nawet dla ludzi."
+                },
+                {
+                    text: "Konwersja temperatury między stopniami Celsjusza a Fahrenheita",
+                    correct: false,
+                    explanation: "To prosta formuła matematyczna (F = C × 9/5 + 32), którą łatwo zaimplementować za pomocą tradycyjnego programowania. Istnieje jedna poprawna odpowiedź dla każdego wejścia, co czyni uczenie przez wzmacnianie niepotrzebnie złożonym dla tego zadania."
+                }
+            ],
+            hint: "Zastanów się, które zadanie ma reguły, które trudno określić jawnie, ale można ich nauczyć metodą prób i błędów."
+        }
+    ]}
+/>
+
+## Następne kroki
+
+Gotowy, by iść dalej? Twoje następne kroki mogą obejmować:
+- [Jak korzystać z panelu kontrolnego?](../beginner/howtodashboard)
+- [Praca z akcjami ciągłymi](../beginner/continuousactions)
+- [Przykład Cart-Pole](../beginner/cartpole)
+
+Mamy dwa główne dostępne algorytmy:
+- DQN: To, czego właśnie użyliśmy, dobre dla prostych wyborów, korzysta z dużej pamięci powtórek.
+- PPO: Bardziej zaawansowany, obsługuje akcje ciągłe (jak kontrolowanie prędkości lub kierunku)
+
+:::note[Zrozumienie swojego postępu]
+<details>
+    <summary>Kluczowe wnioski</summary>
+
+    Nauczyłeś się:
+    1. Jak uczenie przez wzmacnianie różni się od tradycyjnego programowania
+    2. Jak stworzyć podstawowe środowisko uczenia
+    3. Jak skonfigurować i uruchomić uczenie
+    4. Elementy składowe dla bardziej złożonych aplikacji
+
+    Co najważniejsze, zobaczyłeś, jak możemy uczyć komputery poprzez doświadczenie, a nie jawne instrukcje.
+</details>
+:::

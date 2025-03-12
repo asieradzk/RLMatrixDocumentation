@@ -1,0 +1,131 @@
+---
+title: 如何使用仪表板
+description: 学习如何使用 RLMatrix 仪表板实时监控训练进度。
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+
+在我们的[入门指南](/beginner/gettingstarted/)之后，您可能想知道如何监控 AI 的训练进度。虽然在简单示例中，打印到控制台已经足够，但实际项目通常需要更复杂的监控方式。
+
+RLMatrix 仪表板提供了训练指标的实时可视化，帮助您确定 AI 是否有效学习、是否已完成训练，或是否未能取得进展。
+
+## 设置仪表板
+
+:::caution[前提条件]
+确保您的系统上安装了 .NET Web SDK (`Microsoft.NET.Sdk.Web`)。这是运行仪表板应用程序所必需的。
+:::
+
+### 选项 1：克隆完整仓库
+
+如果您想要完整的 RLMatrix 源代码：
+
+```bash title="克隆完整的 RLMatrix 仓库"
+git clone https://github.com/asieradzk/RL_Matrix.git
+```
+
+### 选项 2：仅获取仪表板
+
+如果您只需要仪表板组件：
+
+```bash title="使用 Git sparse-checkout 只克隆仪表板"
+git clone --filter=blob:none --sparse https://github.com/asieradzk/RL_Matrix.git
+cd RL_Matrix
+git sparse-checkout set src/RLMatrix.Dashboard
+```
+
+## 运行仪表板
+
+获得仪表板代码后，您可以：
+
+1. 在您喜欢的编辑器中打开项目（如 Visual Studio 或 VS Code）
+2. 构建并运行项目
+
+或者，您可以构建二进制文件并直接运行。
+
+由于这是一个 Blazor Server 应用程序，您会看到一个控制台窗口，输出类似于：
+
+```bash title="仪表板控制台输出"
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: https://localhost:7126
+info: Microsoft.Hosting.Lifetime[14]
+Now listening on: http://localhost:5069
+info: Microsoft.Hosting.Lifetime[0]
+Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+Content root path: D:\path\to\your\dashboard\RLMatrix.Dashboard
+```
+
+如果浏览器窗口没有自动打开，请在浏览器中导航到 [https://localhost:7126](https://localhost:7126)。
+
+:::tip
+首次打开仪表板时，左上角的实验下拉菜单将为空。这是正常的 - 训练开始后它会自动填充。
+:::
+
+## 将项目连接到仪表板
+
+让我们回顾一下[入门指南](/beginner/gettingstarted/)中的模式匹配示例。当您运行训练代码时，应该会在控制台中看到以下消息：
+
+```
+Connected to dashboard
+```
+
+如果没有看到此消息，则表示连接出现问题。请检查：
+1. 仪表板是否正在运行
+2. 训练代码是否有正确的连接设置
+3. 是否有防火墙阻止连接
+
+## 解读仪表板数据
+
+启动训练后，刷新仪表板页面。您现在应该能在左上角的下拉菜单中看到您的实验名称。选择它以查看训练指标：
+
+![RLMatrix 仪表板](/images/dashboard/dashboard.png)
+
+仪表板显示几个重要指标：
+
+### 随时间变化的奖励
+此图表显示每个回合获得的奖励。在我们的模式匹配示例中，随着 AI 学习正确的模式，您应该会看到 -1 奖励出现的频率降低。
+
+### 累积奖励随时间变化
+这显示了随时间累积的奖励总和。**这个图表的斜率变化特别重要** - 当您的 AI 学会最大化奖励时，斜率会变得更陡。
+
+:::note[需要关注什么]
+累积奖励图中稳步增加的斜率是模型正在改进的最佳指标之一。
+恒定斜率可能意味着模型陷入停滞，需要更高的探索刺激。
+:::
+
+### 回合长度随时间变化
+这跟踪每个回合需要多少步骤。在我们简单的模式匹配示例中，由于每个回合只有一步，这个值始终为 1。在更复杂的环境中（如 Cart-Pole），此指标可以显示智能体是否随着时间的推移存活更长。
+
+### 损失随时间变化
+这显示神经网络的损失函数值。**寻找总体下降的趋势** - 这表明您的模型正在更好地拟合数据。
+
+### 学习率随时间变化
+这显示神经网络学习率的变化。默认情况下，RLMatrix 使用一个调度器，在训练期间会导致小幅振荡。
+
+## 实时更新
+
+仪表板最强大的功能之一是实时更新。随着训练的进行，仪表板会自动更新以反映最新的指标。
+
+在我们的模式匹配示例中，您可以在控制台窗口中按 Enter 继续训练，并观察仪表板实时更新。
+
+## 导出训练数据
+
+为了进一步分析或记录，您可以通过点击仪表板右上角的"Export as CSV"按钮导出训练数据。
+
+这允许您：
+- 在 Excel 或其他工具中执行自定义分析
+- 比较不同的训练运行
+- 与同事分享结果
+
+## 下一步
+
+现在您已了解如何使用仪表板监控训练，您可以开始探索更复杂的环境和动作空间了。
+
+<LinkCard
+    title="使用连续动作"
+    description="学习如何训练具有连续动作空间的智能体，以解决更真实的控制问题。"
+    href="/beginner/continuousactions/"
+/>
