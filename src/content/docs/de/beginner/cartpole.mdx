@@ -1,0 +1,394 @@
+---
+title: Cartpole-Beispiel
+description: Lerne, eine Stange auf einem beweglichen Wagen mit Reinforcement Learning zu balancieren
+---
+
+import Quiz from '@/components/Quiz.astro';
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+Bereit, Reinforcement Learning in Aktion zu sehen? In diesem Tutorial nehmen wir die klassische Balancier-Herausforderung an, bei der du beobachten kannst, wie deine KI lernt, eine Stange auf einem beweglichen Wagen aufrecht zu halten.
+
+<video autoplay loop muted playsinline width="100%" style="cursor: pointer;" onclick="this.paused ? this.play() : this.pause();">
+    <source src="/images/cartpole/cartpole.mp4" type="video/mp4" />
+    <source src="/images/cartpole/cartpole.webm" type="video/webm" />
+    Dein Browser unterstützt keine HTML5-Videos.
+</video>
+
+Die Cartpole-Herausforderung verbindet Einfachheit mit visuellem Feedback und ist damit perfekt für Reinforcement Learning geeignet. Du schiebst einen Wagen nach links oder rechts, und die Physik bestimmt, ob die daran befestigte Stange im Gleichgewicht bleibt oder umkippt. In jedem Zeitschritt trifft dein Agent eine Entscheidung, und du hast die Freude zu beobachten, wie dein Algorithmus allmählich die Aufgabe meistert.
+
+:::note[Mehr als nur Grundlagen]
+<details>
+    <summary>Was macht diese Herausforderung besonders?</summary>
+
+    Cartpole hat sich als Benchmark etabliert, weil es genau im richtigen Bereich zwischen trivial und überwältigend liegt:
+
+    - Du kannst die Verbesserung deines Agenten in Echtzeit beobachten
+    - Die Physik ist intuitiv, aber die Beherrschung der Steuerung ist nicht einfach
+    - Das Training ist schnell abgeschlossen (Minuten, nicht Stunden)
+    - Der Erfolg ist eindeutig - entweder bleibt die Stange oben oder nicht
+    - Die Techniken lassen sich direkt auf komplexere Steuerungsprobleme übertragen
+
+</details>
+:::
+
+## Einrichten deines Projekts
+
+Wir verwenden [SciSharp/Gym.NET](https://github.com/SciSharp/Gym.NET), um unsere simulierte physikalische Umgebung bereitzustellen.
+
+:::caution[Windows erforderlich]
+Dieses Beispiel nutzt Windows Forms für die Darstellung. Wenn du ein anderes Betriebssystem verwendest, gibt es einen Avalonia-basierten Renderer für Gym.NET, den wir hier jedoch nicht behandeln werden. Alternativ kannst du dir das kommende Godot-basierte Beispiel ansehen, das plattformübergreifend funktioniert.
+:::
+
+Du kannst die Anleitung befolgen oder das [vollständige Projekt](https://github.com/asieradzk/RLMatrixGettingStartedExample3_CartPole) herunterladen, wenn du möchtest.
+
+Installieren wir die notwendigen Pakete:
+
+```bash title="Installation der notwendigen Pakete"
+dotnet add package RLMatrix
+dotnet add package RLMatrix.Toolkit
+dotnet add package Gym.NET
+dotnet add package Gym.NET.Environments
+dotnet add package Gym.NET.Rendering.WinForm
+```
+
+## Aufbau der Umgebung
+
+Hier ist unsere Implementierung der Cartpole-Umgebung:
+
+```csharp title="CartPoleEnvironment.cs"
+using System;
+using System.Threading.Tasks;
+using Gym.Environments.Envs.Classic;
+using Gym.Rendering.WinForm;
+using RLMatrix.Toolkit;
+using NumSharp;
+
+namespace MyEnv
+{
+    [RLMatrixEnvironment]
+    public partial class CartPoleEnvironment
+    {
+        private CartPoleEnv myEnv;
+        private float[] myState;
+        private int stepCounter;
+        private const int MaxSteps = 100000;
+        private bool isDone;
+
+        public CartPoleEnvironment()
+        {
+            InitialiseAsync();
+        }
+
+        private void InitialiseAsync()
+        {
+            myEnv = new CartPoleEnv(WinFormEnvViewer.Factory);
+            ResetEnvironment();
+        }
+
+        [RLMatrixObservation]
+        public float GetCartPosition() => myState[0];
+
+        [RLMatrixObservation]
+        public float GetCartVelocity() => myState[1];
+
+        [RLMatrixObservation]
+        public float GetPoleAngle() => myState[2];
+
+        [RLMatrixObservation]
+        public float GetPoleAngularVelocity() => myState[3];
+
+        [RLMatrixActionDiscrete(2)]
+        public void ApplyForce(int action)
+        {
+            if (isDone)
+                ResetEnvironment();
+
+            var (observation, reward, done, _) = myEnv.Step(action);
+            myEnv.Render();
+            myState = ToFloatArray(observation);
+            isDone = done;
+            stepCounter++;
+
+            if (stepCounter > MaxSteps)
+                isDone = true;
+        }
+
+        private float[] ToFloatArray(NDArray npArray)
+        {
+            double[] doubleArray = npArray.ToArray<double>();
+            return Array.ConvertAll(doubleArray, item => (float)item);
+        }
+
+        [RLMatrixReward]
+        public float CalculateReward()
+        {
+            return isDone ? 0 : 1;
+        }
+
+        [RLMatrixDone]
+        public bool IsEpisodeFinished()
+        {
+            return isDone;
+        }
+
+        [RLMatrixReset]
+        public void ResetEnvironment()
+        {
+            myEnv.Reset();
+            myState = new float[4] { 0, 0, 0, 0 };
+            isDone = false;
+            stepCounter = 0;
+        }
+    }
+}
+```
+
+:::tip[Was hier passiert]
+Unsere Umgebung stellt dem Agenten vier Informationen zur Verfügung:
+- Position und Geschwindigkeit des Wagens
+- Winkel der Stange und ihre Winkelgeschwindigkeit
+
+Der Agent hat zwei mögliche Aktionen: nach links schieben (0) oder nach rechts schieben (1).
+
+Jedes Mal wenn der Agent schiebt, führen wir die Physiksimulation einen Schritt weiter, aktualisieren das Fenster und entscheiden, ob die Episode fortgesetzt werden soll. Wir vergeben eine Belohnung von +1 für jeden Zeitschritt, in dem die Stange aufrecht bleibt, was längere Balanceperioden fördert.
+
+Das Muster der Tupel-Entpackung (`var (observation, reward, done, _) = myEnv.Step(action)`) stammt aus den Python-Ursprüngen von Gym.NET. Obwohl es funktioniert, passt es nicht perfekt zur Design-Philosophie von RLMatrix.
+:::
+
+## Einrichten des Trainings
+
+Hier ist der Code für das Training, der unserem Agenten das Balancieren beibringen wird:
+
+```csharp title="Program.cs"
+using RLMatrix.Agents.Common;
+using RLMatrix;
+using MyEnv;
+
+Console.WriteLine("Starting cart-pole training...\n");
+
+// Lernparameter konfigurieren
+var learningSetup = new PPOAgentOptions(
+    batchSize: 8,
+    ppoEpochs: 8,
+    memorySize: 1000,
+    gamma: 0.99f,
+    width: 128,
+    entropyCoefficient: 0.01f,
+    lr: 1E-02f
+);
+
+// Umgebung erstellen und an den Agenten anhängen
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+var env = new List<IEnvironmentAsync<float[]>> {
+    environment,
+    //new CartPoleEnvironment().RLInit() //auskommentieren, um mit mehreren Umgebungen zu trainieren
+};
+
+// Agenten initialisieren
+var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
+
+// Trainieren bis zur Konvergenz
+for (int i = 0; i < 100000; i++)
+{
+    await agent.Step();
+}
+
+Console.WriteLine("\nTraining complete!");
+Console.ReadLine();
+```
+
+Die einfache Belohnung von +1 pro Zeitschritt ist täuschend leistungsstark. Deep-Reinforcement-Learning-Algorithmen optimieren natürlicherweise für langfristige Ziele und entdecken, dass subtile, präventive Anpassungen zu längeren Balancezeiten und höheren kumulativen Belohnungen führen.
+
+## PPO in RLMatrix: Was ist anders
+
+:::caution[Implementierungsunterschiede]
+Die PPO-Implementierung in RLMatrix ist für verteiltes Training optimiert, was einige Unterschiede zu dem erzeugt, was du in Forschungspapieren oder anderen Frameworks sehen könntest:
+
+<details>
+    <summary>Wissenswert, wenn du Implementierungen vergleichst</summary>
+
+    1. **Interpretation der Batch-Größe**: In RLMatrix bezieht sich `batchSize` auf die Anzahl der vollständigen *Episoden*, die vor der Modellaktualisierung gesammelt werden – nicht auf die Anzahl der einzelnen Schritte wie in vielen anderen Implementierungen.
+
+    2. **On-Policy-Lernen**: PPO lernt nur aus den neuesten Erfahrungen mit der aktuellen Policy und verwirft sie dann. Deshalb ist es vorteilhaft, mehr Batches als Umgebungen zu haben – es gibt dem Algorithmus vielfältigere Daten zum Lernen.
+
+    3. **Mehrfache Trainingsdurchläufe**: Der Parameter `ppoEpochs` steuert, wie viele Durchläufe wir durch die gesammelten Erfahrungen machen. Da wir die Daten danach verwerfen, wollen wir durch mehrfache Durchläufe maximalen Nutzen daraus ziehen.
+
+</details>
+:::
+
+Während DQN (aus unseren früheren Tutorials) für einfache Aufgaben effizienter bezüglich der Stichprobennutzung sein kann, liefert PPO im Allgemeinen ein stabileres Training ohne umfangreiches Hyperparameter-Tuning. Das macht es besonders gut geeignet für anspruchsvolle Steuerungsprobleme.
+
+## Der speichersparende Trick, den du kennen musst
+
+Schau dir diese Zeile in unserem Trainingscode an:
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+```
+
+Diese unscheinbare Parameterkonfiguration enthält den Schlüssel zum Training mit sehr langen Episoden, ohne den GPU-Speicher zu überlasten. Lass mich erklären:
+
+:::danger[Speicher-Durchbruch für lange Episoden]
+Die Unterscheidung zwischen weichen und harten Episodengrenzen revolutioniert, wie wir mit langen Trainingsepisoden umgehen:
+
+- **maxStepsHard**: Die absolute Obergrenze, bevor ein Umgebungs-Reset erzwungen wird
+- **maxStepsSoft**: Wann die Berechnung von Belohnungen und Gradienten gestoppt wird, während die Physik weiterläuft
+
+Dieser Mechanismus wird unschätzbar, wenn deine Episoden tausende von Schritten dauern könnten.
+:::
+
+Was passiert, wenn wir diese Werte ändern?
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 200, maxStepsHard: 1200);
+```
+
+Jetzt geschieht die Magie:
+1. Wir sammeln Belohnungen und berechnen Gradienten nur für die ersten 200 Schritte
+2. Die Simulation läuft natürlich bis zu 1200 Schritte oder bis zum Scheitern weiter
+3. Der GPU-Speicherverbrauch sinkt erheblich
+
+Wenn du diese Konfiguration ausführst, überprüfe die Belohnungsgrafiken – du wirst feststellen, dass keine Belohnung 200 (unsere weiche Grenze) überschreitet, obwohl die Cartpole-Physik über diesen Punkt hinaus weiterläuft. Öffne deinen Task-Manager und beobachte die Speichereinsparungen in Echtzeit.
+
+Diese Technik wird für komplexe Umgebungen, in denen Episoden unendlich lang laufen können, unverzichtbar. Anstatt mit Out-of-Memory-Fehlern abzustürzen, kontrollierst du genau, wie viel Rechenaufwand investiert wird, während die natürliche Umgebungsdynamik erhalten bleibt.
+
+## Den Lernprozess beobachten
+
+Wenn du dieses Training startest, öffnet sich ein Fenster mit der Cartpole-Umgebung. Anfangs wird die Stange schnell umkippen – dein Agent hat keine Ahnung, was er tut. Aber innerhalb weniger Minuten wirst du eine bemerkenswerte Transformation beobachten:
+
+1. Zunächst macht der Agent zufällige Bewegungen ohne Strategie
+2. Dann beginnt er zu reagieren, wenn die Stange bereits fällt (zu spät!)
+3. Er lernt allmählich, Korrekturbewegungen immer früher auszuführen
+4. Schließlich macht er subtile, präventive Anpassungen und hält die Stange perfekt im Gleichgewicht
+
+Diese sichtbare Progression macht Cartpole zu einem so befriedigenden Lernbeispiel. Du siehst nicht nur, wie sich Zahlen in einem Diagramm verbessern – du beobachtest, wie deine KI vor deinen Augen eine Fertigkeit entwickelt.
+
+## Teste dein Verständnis
+
+<Quiz
+    title="Reinforcement Learning bei Cartpole verstehen"
+    questions={[
+        {
+            question: "Warum gilt Cartpole als ideales Beispiel für Reinforcement Learning?",
+            options: [
+                {
+                    text: "Es erfordert minimale Rechenressourcen im Vergleich zu anderen RL-Problemen",
+                    correct: false,
+                    explanation: "Obwohl Cartpole weniger ressourcenintensiv ist als einige komplexe Umgebungen, betont das Tutorial andere Gründe für seinen Wert als Lernbeispiel. Die Recheneffizienz ist nicht sein Hauptvorteil."
+                },
+                {
+                    text: "Es bietet visuelles Feedback, bei dem du die Fertigkeitsentwicklung deines Agenten in Echtzeit beobachten kannst",
+                    correct: true,
+                    explanation: "Genau richtig! Das Tutorial hebt diesen visuellen Aspekt als das hervor, was Cartpole so befriedigend macht: 'Du siehst nicht nur, wie sich Zahlen in einem Diagramm verbessern – du beobachtest, wie deine KI vor deinen Augen eine Fertigkeit entwickelt.' Diese unmittelbare, intuitive Feedbackschleife macht den Lernprozess greifbar."
+                },
+                {
+                    text: "Es ist das einzige Reinforcement-Learning-Problem mit einer garantierten optimalen Lösung",
+                    correct: false,
+                    explanation: "Cartpole hat keine einzigartig garantierte optimale Lösung im Vergleich zu anderen RL-Problemen. Viele RL-Aufgaben haben optimale oder nahezu optimale Lösungen. Der Wert von Cartpole liegt woanders, besonders in seinem intuitiven visuellen Feedback."
+                }
+            ],
+            hint: "Überlege, was Cartpole laut Tutorial zu einem besonders befriedigenden Lernbeispiel macht."
+        },
+        {
+            question: "Welche Belohnungsstrategie verwendet die Cartpole-Umgebung, um den Agenten zum Balancieren der Stange zu ermutigen?",
+            options: [
+                {
+                    text: "Eine große positive Belohnung nur, wenn die Stange perfekt vertikal bleibt",
+                    correct: false,
+                    explanation: "Die Umgebung belohnt nicht speziell die perfekte Vertikalität. Die Suche nach absoluter Perfektion würde ein Problem mit spärlichen Belohnungen schaffen, was das Lernen viel schwieriger machen würde."
+                },
+                {
+                    text: "Eine +1 Belohnung für jeden Zeitschritt, in dem die Stange oben bleibt, 0 wenn sie fällt",
+                    correct: true,
+                    explanation: "Richtig! Der Code zeigt, dass `CalculateReward()` 1 zurückgibt, wenn die Episode weiterläuft, und 0, wenn sie beendet ist. Dieser einfache Ansatz schafft einen mächtigen Anreiz: Je länger die Stange balanciert bleibt, desto mehr Gesamtbelohnung erhält der Agent, was ihn natürlich dazu ermutigt, das Balancieren zu beherrschen."
+                },
+                {
+                    text: "Eine abgestufte Belohnung basierend darauf, wie nahe die Stange an der Vertikalen ist (höhere Belohnung für vertikalere Position)",
+                    correct: false,
+                    explanation: "Obwohl dieser Ansatz funktionieren könnte, ist es nicht das, was unsere Implementierung verwendet. Unsere Umgebung verwendet eine einfachere binäre Belohnung: +1 für jeden überlebten Zeitschritt, unabhängig vom genauen Winkel, und 0, wenn die Episode endet."
+                }
+            ],
+            hint: "Überprüfe die `CalculateReward()`-Methode im Umgebungscode, um genau zu sehen, welche Belohnung wann gegeben wird."
+        },
+        {
+            question: "Was ist der Zweck der Festlegung unterschiedlicher Werte für maxStepsSoft und maxStepsHard?",
+            options: [
+                {
+                    text: "Die Lerngeschwindigkeit künstlich zu erhöhen, indem Episoden vorzeitig beendet werden",
+                    correct: false,
+                    explanation: "Es geht nicht darum, das Lernen künstlich zu beschleunigen. Tatsächlich können Episoden immer noch bis zu ihrem natürlichen Abschluss laufen, bis zu maxStepsHard. Die Unterscheidung dient einem anderen Zweck im Zusammenhang mit der Recheneffizienz."
+                },
+                {
+                    text: "Den GPU-Speicherverbrauch zu reduzieren, indem Belohnungsberechnungen begrenzt werden, während die natürliche Umgebungsprogression ermöglicht wird",
+                    correct: true,
+                    explanation: "Das ist richtig! Wie das Tutorial erklärt, ermöglicht diese Technik, 'genau zu kontrollieren, wie viel Rechenaufwand investiert wird, während die natürliche Umgebungsdynamik erhalten bleibt.' Du sammelst Belohnungen und Gradienten nur bis maxStepsSoft, aber die Simulation läuft natürlich bis maxStepsHard weiter, was den Speicherverbrauch für lange Episoden erheblich reduziert."
+                },
+                {
+                    text: "Ein Curriculum zu erstellen, bei dem der Agent zuerst kurze Episoden lernt, bevor er längere in Angriff nimmt",
+                    correct: false,
+                    explanation: "Obwohl Curriculum-Learning eine gültige RL-Technik ist, ist das nicht der Zweck der Soft/Hard-Schrittgrenzen. Diese Parameter erhöhen nicht progressiv die Episodenlänge - sie verwalten Rechenressourcen bei gleichzeitiger Aufrechterhaltung des natürlichen Umgebungsverhaltens."
+                }
+            ],
+            hint: "Überlege, was mit dem GPU-Speicher passiert, wenn Episoden sehr lang werden, und wie diese Parameterkonfiguration hilft, dieses Problem zu lösen."
+        },
+        {
+            question: "Wie unterscheidet sich RLMatrix's Interpretation des batchSize-Parameters in PPO von Standardimplementierungen?",
+            options: [
+                {
+                    text: "Er bezieht sich auf die Anzahl der vollständigen Episoden, die vor der Modellaktualisierung gesammelt werden, nicht auf einzelne Schritte",
+                    correct: true,
+                    explanation: "Genau richtig! Das Tutorial weist ausdrücklich auf diesen Unterschied hin: 'In RLMatrix bezieht sich batchSize auf die Anzahl der vollständigen Episoden, die vor der Modellaktualisierung gesammelt werden – nicht auf die Anzahl der einzelnen Schritte wie in vielen anderen Implementierungen.' Dies ist ein wichtiger Unterschied bei der Konfiguration deines Trainings."
+                },
+                {
+                    text: "Er bestimmt die Größe der versteckten Schichten des neuronalen Netzwerks",
+                    correct: false,
+                    explanation: "Die Batch-Größe bestimmt nicht die Architektur des neuronalen Netzwerks. In RLMatrix steuert der Parameter 'width' die Größe der versteckten Schichten. Die Batch-Größe bezieht sich stattdessen darauf, wie viel Erfahrung vor Lernaktualisierungen gesammelt wird."
+                },
+                {
+                    text: "Er steuert, wie viele Trainingsschritte vor der Bewertung des Agenten durchgeführt werden sollen",
+                    correct: false,
+                    explanation: "Das ist nicht die Bedeutung der Batch-Größe in RLMatrix's PPO-Implementierung. Die Batch-Größe bezieht sich speziell auf die Datensammlung für das Lernen, nicht auf den Bewertungszeitplan."
+                }
+            ],
+            hint: "Das Tutorial enthält einen speziellen Abschnitt, der die Unterschiede in der PPO-Implementierung von RLMatrix erklärt - überprüfe, was es über die Interpretation der Batch-Größe sagt."
+        },
+        {
+            question: "Welche Transformation im Verhalten des Agenten würdest du im Laufe des Trainings erwarten?",
+            options: [
+                {
+                    text: "Der Agent wird zunehmend komplexe Bewegungsmuster entwickeln, die zufällig erscheinen, aber das Gleichgewicht halten",
+                    correct: false,
+                    explanation: "Erfolgreiche Agenten entwickeln typischerweise keine zufällig aussehenden Bewegungen. Die Progression tendiert eher zu subtiler, gezielter Kontrolle als zu komplexen oder chaotischen Mustern."
+                },
+                {
+                    text: "Der Agent wird von zufälligen Bewegungen über reaktive Korrekturen zu präventiven Anpassungen fortschreiten",
+                    correct: true,
+                    explanation: "Genau wie im Tutorial beschrieben! Der Agent durchläuft diese Progression: zufällige Bewegungen → reaktive Korrekturen (wenn die Stange bereits fällt) → frühere Eingriffe → subtile präventive Anpassungen. Dies zeigt, wie er lernt, Probleme zu antizipieren, anstatt nur auf sie zu reagieren."
+                },
+                {
+                    text: "Der Agent wird lernen, den Wagen jederzeit perfekt auf dem Bildschirm zu zentrieren",
+                    correct: false,
+                    explanation: "Die Zentrierung des Wagens ist nicht unbedingt die optimale Strategie. Das Ziel ist es, die Stange im Gleichgewicht zu halten, was strategische Bewegungen des Wagens erfordern kann. Perfekte Zentrierung wird nicht als Teil der erwarteten Verhaltensprogression erwähnt."
+                }
+            ],
+            hint: "Das Tutorial skizziert eine spezifische Verhaltensprogression, die du beobachten wirst, während der Agent lernt. Suche nach der nummerierten Liste, die diese Transformation beschreibt."
+        }
+    ]}
+/>
+
+## Nächste Schritte
+
+In diesem Tutorial hast du:
+- Eine Echtzeit-Physiksimulation für Reinforcement Learning eingerichtet
+- Einen vollständigen Agenten implementiert, um ein klassisches Steuerungsproblem zu meistern
+- Gelernt, wie man Speicher effizient mit dem Soft/Hard-Beendigungstrick verwaltet
+- Verstanden, wie sich RLMatrix's PPO-Implementierung von Standardimplementierungen unterscheidet
+
+Als Nächstes werden wir die gleiche Umgebung ohne Toolkit implementieren, was dir Einblicke in das gibt, was hinter den eleganten Attributen steckt, die wir verwendet haben.
+
+<LinkCard
+    title="Cartpole ohne Toolkit"
+    description="Sieh, was unter der Haube passiert, indem du Cartpole ohne die Toolkit-Abstraktion implementierst."
+    href="/beginner/cartpolenotoolkit/"
+/>

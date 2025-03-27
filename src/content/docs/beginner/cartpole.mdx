@@ -1,8 +1,395 @@
 ---
-title: Cartpole Example
-description: How to setup the famous cartpole environment using RLMatrix toolkit.
+title: Cart-Pole Example
+description: Learn to balance a pole on a moving cart with reinforcement learning
 ---
 
-:::caution[Under Construction]
-Will appear soon.
+import Quiz from '@/components/Quiz.astro';
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+Ready to see reinforcement learning in action? In this tutorial, we'll take on the classic balancing challenge where you'll watch your AI learn to keep a pole upright on a moving cart.
+
+<video autoplay loop muted playsinline width="100%" style="cursor: pointer;" onclick="this.paused ? this.play() : this.pause();">
+    <source src="/images/cartpole/cartpole.mp4" type="video/mp4" />
+    <source src="/images/cartpole/cartpole.webm" type="video/webm" />
+    Your browser doesn't support HTML5 video.
+</video>
+
+The cart-pole challenge blends simplicity with visual feedback, making it perfect for reinforcement learning. You push a cart left or right, and physics determines whether the attached pole stays balanced or topples over. Every time step, your agent makes a decision, and you get the satisfaction of watching your algorithm gradually master the task.
+
+:::note[Beyond the Basics]
+<details>
+    <summary>What makes this challenge special?</summary>
+
+    Cart-pole has endured as a benchmark because it sits in the sweet spot between trivial and overwhelming:
+
+    - You can watch your agent improve in real-time
+    - The physics are intuitive but mastering control isn't
+    - Training completes quickly (minutes, not hours)
+    - Success is unambiguous - either the pole stays up or it doesn't
+    - The techniques transfer directly to more complex control problems
+
+</details>
 :::
+
+## Setting Up Your Project
+
+We'll use [SciSharp/Gym.NET](https://github.com/SciSharp/Gym.NET) to provide our simulated physics environment.
+
+:::caution[Windows Required]
+This example relies on Windows Forms for rendering. If you're using another operating system, there is an Avalonia-based renderer available for Gym.NET, though we won't cover it here. Alternatively, check out the upcoming Godot-based example that works across platforms.
+:::
+
+You can follow along or grab the [complete project](https://github.com/asieradzk/RLMatrixGettingStartedExample3_CartPole) if you prefer.
+
+Let's install the necessary packages:
+
+```bash title="Installing the necessary packages"
+dotnet add package RLMatrix
+dotnet add package RLMatrix.Toolkit
+dotnet add package Gym.NET
+dotnet add package Gym.NET.Environments
+dotnet add package Gym.NET.Rendering.WinForm
+```
+
+## Building the Environment
+
+Here's our cart-pole environment implementation:
+
+```csharp title="CartPoleEnvironment.cs"
+using System;
+using System.Threading.Tasks;
+using Gym.Environments.Envs.Classic;
+using Gym.Rendering.WinForm;
+using RLMatrix.Toolkit;
+using NumSharp;
+
+namespace MyEnv
+{
+    [RLMatrixEnvironment]
+    public partial class CartPoleEnvironment
+    {
+        private CartPoleEnv myEnv;
+        private float[] myState;
+        private int stepCounter;
+        private const int MaxSteps = 100000;
+        private bool isDone;
+
+        public CartPoleEnvironment()
+        {
+            InitialiseAsync();
+        }
+
+        private void InitialiseAsync()
+        {
+            myEnv = new CartPoleEnv(WinFormEnvViewer.Factory);
+            ResetEnvironment();
+        }
+
+        [RLMatrixObservation]
+        public float GetCartPosition() => myState[0];
+
+        [RLMatrixObservation]
+        public float GetCartVelocity() => myState[1];
+
+        [RLMatrixObservation]
+        public float GetPoleAngle() => myState[2];
+
+        [RLMatrixObservation]
+        public float GetPoleAngularVelocity() => myState[3];
+
+        [RLMatrixActionDiscrete(2)]
+        public void ApplyForce(int action)
+        {
+            if (isDone)
+                ResetEnvironment();
+
+            var (observation, reward, done, _) = myEnv.Step(action);
+            myEnv.Render();
+            myState = ToFloatArray(observation);
+            isDone = done;
+            stepCounter++;
+
+            if (stepCounter > MaxSteps)
+                isDone = true;
+        }
+
+        private float[] ToFloatArray(NDArray npArray)
+        {
+            double[] doubleArray = npArray.ToArray<double>();
+            return Array.ConvertAll(doubleArray, item => (float)item);
+        }
+
+        [RLMatrixReward]
+        public float CalculateReward()
+        {
+            return isDone ? 0 : 1;
+        }
+
+        [RLMatrixDone]
+        public bool IsEpisodeFinished()
+        {
+            return isDone;
+        }
+
+        [RLMatrixReset]
+        public void ResetEnvironment()
+        {
+            myEnv.Reset();
+            myState = new float[4] { 0, 0, 0, 0 };
+            isDone = false;
+            stepCounter = 0;
+        }
+    }
+}
+```
+
+:::tip[What's Happening Here]
+Our environment exposes four pieces of information to the agent:
+- The cart's position and velocity
+- The pole's angle and how fast it's rotating
+
+The agent has two possible moves: push left (0) or push right (1).
+
+Each time the agent pushes, we step the physics simulation forward, redraw the window, and decide if the episode should continue. We award a +1 reward for every surviving time step, incentivizing longer balancing periods.
+
+The tuple-unpacking pattern (`var (observation, reward, done, _) = myEnv.Step(action)`) is inherited from Gym.NET's Python origins. While it works, it doesn't align perfectly with RLMatrix's design philosophy.
+:::
+
+## Setting Up Training
+
+Now for the training code that will teach our agent to balance:
+
+```csharp title="Program.cs"
+using RLMatrix.Agents.Common;
+using RLMatrix;
+using MyEnv;
+
+Console.WriteLine("Starting cart-pole training...\n");
+
+// Configure learning parameters
+var learningSetup = new PPOAgentOptions(
+    batchSize: 8,
+    ppoEpochs: 8,
+    memorySize: 1000,
+    gamma: 0.99f,
+    width: 128,
+    entropyCoefficient: 0.01f,
+    lr: 1E-02f
+);
+
+// Create environment and attach to agent
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+var env = new List<IEnvironmentAsync<float[]>> {
+    environment,
+    //new CartPoleEnvironment().RLInit() //uncomment to train with multiple environments
+};
+
+// Initialize agent
+var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
+
+// Train until convergence
+for (int i = 0; i < 100000; i++)
+{
+    await agent.Step();
+}
+
+Console.WriteLine("\nTraining complete!");
+Console.ReadLine();
+```
+
+The simple reward of +1 per time step is deceptively powerful. Deep reinforcement learning algorithms naturally optimize for the long game, figuring out that subtle, preemptive adjustments lead to longer balancing times and higher cumulative rewards.
+
+## PPO in RLMatrix: What's Different
+
+:::caution[Implementation Differences]
+RLMatrix's PPO implementation is optimized for distributed training, which creates some differences from what you might see in research papers or other frameworks:
+
+<details>
+    <summary>Worth knowing if you're comparing implementations</summary>
+
+    1. **Batch Size Interpretation**: In RLMatrix, `batchSize` refers to the number of complete *episodes* to collect before updating the model – not the number of individual steps as in many other implementations.
+
+    2. **On-Policy Learning**: PPO only learns from recent experiences using the current policy, then discards them. This is why having more batches than environments is beneficial – it gives the algorithm more diverse data to learn from.
+
+    3. **Multiple Training Passes**: The `ppoEpochs` parameter controls how many passes we make through the collected experience. Since we'll discard the data afterward, we want to extract maximum value from it with multiple passes.
+
+</details>
+:::
+
+While DQN (from our earlier tutorials) can be more sample-efficient for simple tasks, PPO generally delivers more stable training without requiring extensive hyperparameter tuning. This makes it particularly well-suited for challenging control problems.
+
+## The Memory-Saving Trick You Need to Know
+
+Look at this line in our training code:
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+```
+
+This innocuous parameter configuration holds the key to training with very long episodes without overwhelming your GPU's memory. Let me explain:
+
+:::danger[Memory Breakthrough for Long Episodes]
+The distinction between soft and hard episode limits revolutionizes how we handle lengthy training episodes:
+
+- **maxStepsHard**: The absolute upper limit before forcing an environment reset
+- **maxStepsSoft**: When to stop calculating rewards and gradients, while letting the physics continue
+
+This mechanism becomes invaluable when your episodes might run for thousands of steps.
+:::
+
+What happens when we modify these values?
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 200, maxStepsHard: 1200);
+```
+
+Now the magic happens:
+1. We only accumulate rewards and calculate gradients for the first 200 steps
+2. The simulation continues running naturally up to 1200 steps or until failure
+3. Your GPU memory usage drops significantly
+
+When you run this configuration, check your reward graphs – you'll notice no reward exceeds 200 (our soft limit), even though the cart-pole physics continues beyond that point. Open your task manager and watch the memory savings in real-time.
+
+This technique becomes indispensable for complex environments where episodes can run indefinitely. Instead of crashing with out-of-memory errors, you control precisely how much computational effort to invest while maintaining natural environment dynamics.
+
+## Watching Learning in Action
+
+When you run this training, a window will pop up showing the cart-pole environment. At first, the pole will topple quickly – your agent has no idea what it's doing. But within minutes, you'll witness a remarkable transformation:
+
+1. Initially, the agent makes random movements with no strategy
+2. Then it starts reacting when the pole is already falling (too late!)
+3. It gradually learns to make corrective moves earlier and earlier
+4. Finally, it makes subtle, preemptive adjustments, keeping the pole perfectly balanced
+
+This visible progression is what makes cart-pole so satisfying as a learning example. You're not just seeing numbers improve in a graph – you're watching your AI develop a skill before your eyes.
+
+## Test Your Understanding
+
+<Quiz
+    title="Understanding Cart-Pole Reinforcement Learning"
+    questions={[
+        {
+            question: "Why is Cart-Pole considered an ideal reinforcement learning example?",
+            options: [
+                {
+                    text: "It requires minimal computational resources compared to other RL problems",
+                    correct: false,
+                    explanation: "While Cart-Pole is less resource-intensive than some complex environments, the tutorial emphasizes different reasons for its value as a learning example. The computational efficiency isn't its primary advantage."
+                },
+                {
+                    text: "It provides visual feedback where you can watch your agent's skill progression in real-time",
+                    correct: true,
+                    explanation: "Exactly right! The tutorial highlights this visual aspect as what makes Cart-Pole so satisfying: 'You're not just seeing numbers improve in a graph – you're watching your AI develop a skill before your eyes.' This immediate, intuitive feedback loop makes the learning process tangible."
+                },
+                {
+                    text: "It's the only reinforcement learning problem with a guaranteed optimal solution",
+                    correct: false,
+                    explanation: "Cart-Pole doesn't have a uniquely guaranteed optimal solution compared to other RL problems. Many RL tasks have optimal or near-optimal solutions. The value of Cart-Pole lies elsewhere, particularly in its intuitive visual feedback."
+                }
+            ],
+            hint: "Think about what makes Cart-Pole particularly satisfying as a learning example according to the tutorial."
+        },
+        {
+            question: "What reward strategy does the Cart-Pole environment use to encourage the agent to balance the pole?",
+            options: [
+                {
+                    text: "A large positive reward only when the pole remains perfectly vertical",
+                    correct: false,
+                    explanation: "The environment doesn't specifically reward perfect verticality. Looking for absolute perfection would create a sparse reward problem, making learning much more difficult."
+                },
+                {
+                    text: "A +1 reward for every time step the pole stays up, 0 when it falls",
+                    correct: true,
+                    explanation: "Correct! The code shows `CalculateReward()` returns 1 when the episode continues and 0 when it's done. This simple approach creates a powerful incentive: the longer the pole stays balanced, the more total reward the agent receives, naturally encouraging it to master balancing."
+                },
+                {
+                    text: "A graduated reward based on how close the pole is to vertical (higher reward for more vertical)",
+                    correct: false,
+                    explanation: "While this approach could work, it's not what our implementation uses. Our environment uses a simpler binary reward: +1 for each surviving time step, regardless of the exact angle, and 0 when the episode ends."
+                }
+            ],
+            hint: "Check the `CalculateReward()` method in the environment code to see exactly what reward is given and when."
+        },
+        {
+            question: "What is the purpose of setting different values for maxStepsSoft and maxStepsHard?",
+            options: [
+                {
+                    text: "To artificially increase learning speed by ending episodes prematurely",
+                    correct: false,
+                    explanation: "This isn't about artificially speeding up learning. In fact, episodes can still run to their natural conclusion up to maxStepsHard. The distinction serves a different purpose related to computational efficiency."
+                },
+                {
+                    text: "To reduce GPU memory usage by limiting reward calculations while allowing natural environment progression",
+                    correct: true,
+                    explanation: "That's right! As the tutorial explains, this technique lets you 'control precisely how much computational effort to invest while maintaining natural environment dynamics.' You accumulate rewards and gradients only until maxStepsSoft, but the simulation continues naturally up to maxStepsHard, significantly reducing memory usage for long episodes."
+                },
+                {
+                    text: "To create a curriculum where the agent first learns short episodes before tackling longer ones",
+                    correct: false,
+                    explanation: "While curriculum learning is a valid RL technique, that's not what the soft/hard step limits are designed for. These parameters don't progressively increase episode length - they manage computational resources while maintaining natural environment behavior."
+                }
+            ],
+            hint: "Consider what happens to GPU memory when episodes get very long, and how this parameter configuration helps address that issue."
+        },
+        {
+            question: "How does RLMatrix's interpretation of PPO's batchSize parameter differ from standard implementations?",
+            options: [
+                {
+                    text: "It refers to the number of complete episodes to collect before updating the model, not individual steps",
+                    correct: true,
+                    explanation: "Exactly right! The tutorial explicitly points out this difference: 'In RLMatrix, batchSize refers to the number of complete episodes to collect before updating the model – not the number of individual steps as in many other implementations.' This is an important distinction when configuring your training."
+                },
+                {
+                    text: "It determines the size of the neural network's hidden layers",
+                    correct: false,
+                    explanation: "The batch size doesn't determine neural network architecture. In RLMatrix, the 'width' parameter controls the size of hidden layers. Batch size instead relates to how much experience is collected before learning updates."
+                },
+                {
+                    text: "It controls how many training steps to perform before evaluating the agent",
+                    correct: false,
+                    explanation: "This isn't what batch size means in RLMatrix's PPO implementation. Batch size specifically relates to data collection for learning, not the evaluation schedule."
+                }
+            ],
+            hint: "The tutorial has a specific section explaining RLMatrix's PPO implementation differences - check what it says about batch size interpretation."
+        },
+        {
+            question: "What transformation would you expect to see in the agent's behavior as training progresses?",
+            options: [
+                {
+                    text: "The agent will develop increasingly complex movement patterns that appear random but maintain balance",
+                    correct: false,
+                    explanation: "Successful agents don't typically develop random-looking movements. The progression tends toward subtle, deliberate control rather than complex or chaotic patterns."
+                },
+                {
+                    text: "The agent will progress from random movements to reactive corrections to preemptive adjustments",
+                    correct: true,
+                    explanation: "Exactly as described in the tutorial! The agent follows this progression: random movements → reactive corrections (when the pole is already falling) → earlier interventions → subtle preemptive adjustments. This shows how it learns to anticipate problems rather than just react to them."
+                },
+                {
+                    text: "The agent will learn to keep the cart perfectly centered on screen at all times",
+                    correct: false,
+                    explanation: "Centering the cart isn't necessarily the optimal strategy. The goal is keeping the pole balanced, which might involve moving the cart strategically. Perfect centering isn't mentioned as part of the expected behavior progression."
+                }
+            ],
+            hint: "The tutorial outlines a specific progression of behavior that you'll observe as the agent learns. Look for the numbered list describing this transformation."
+        }
+    ]}
+/>
+
+## Next Steps
+
+In this tutorial, you've:
+- Set up a real-time physics simulation for reinforcement learning
+- Implemented a complete agent to master a classic control problem
+- Learned how to efficiently manage memory with the soft/hard termination trick
+- Understood how RLMatrix's PPO implementation differs from standard ones
+
+Next, we'll implement the same environment without using the toolkit, giving you insights into what's happening behind those neat attributes we used.
+
+<LinkCard
+    title="Cart-Pole Without Toolkit"
+    description="See what's happening under the hood by implementing cart-pole without the toolkit abstraction."
+    href="/beginner/cartpolenotoolkit/"
+/>
+

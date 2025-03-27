@@ -105,17 +105,30 @@ export default defineConfig({
 							slug: 'beginner/continuousactions'
 						},
 						{
-							label: 'Cartpole Example',
+							label: 'Cart-Pole Example',
 							translations: {
 								'zh-CN': '倒立摆示例',
 								'zh-TW': '倒立擺示例',
 								'ja': 'カートポールの例',
 								'ko': '카트폴 예제',
 								'vi': 'Ví dụ Cartpole',
-								'pl': 'Przykład Cartpole',
-								'de': 'Cartpole-Beispiel',
+								'pl': 'Przykład Cart-Pole',
+								'de': 'Cart-Pole -Beispiel',
 							},
 							slug: 'beginner/cartpole'
+						},
+						{
+							label: 'Cart-Pole Without Toolkit',
+							translations: {
+								'zh-CN': '倒立摆 - 无工具包',
+								'zh-TW': '倒立擺 - 無工具包',
+								'ja': 'カートポール - ツールキットなし',
+								'ko': '카트폴 - 툴킷 없음',
+								'vi': 'Cartpole - Không có Toolkit',
+								'pl': 'Cartpole - Bez Toolkit',
+								'de': 'Cartpole - Ohne Toolkit',
+							},
+							slug: 'beginner/cartpolenotoolkit'
 						},
 					],
 				},

@@ -1,0 +1,394 @@
+---
+title: Przykład Cart-Pole
+description: Naucz się równoważyć drążek na ruchomym wózku za pomocą uczenia przez wzmacnianie
+---
+
+import Quiz from '@/components/Quiz.astro';
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+Gotowy, by zobaczyć uczenie przez wzmacnianie w akcji? W tym samouczku zmierzymy się z klasycznym wyzwaniem równoważenia, gdzie zobaczysz, jak Twoja sztuczna inteligencja uczy się utrzymywać drążek w pozycji pionowej na ruchomym wózku.
+
+<video autoplay loop muted playsinline width="100%" style="cursor: pointer;" onclick="this.paused ? this.play() : this.pause();">
+    <source src="/images/cartpole/cartpole.mp4" type="video/mp4" />
+    <source src="/images/cartpole/cartpole.webm" type="video/webm" />
+    Twoja przeglądarka nie obsługuje wideo HTML5.
+</video>
+
+Wyzwanie cart-pole łączy prostotę z wizualną informacją zwrotną, co czyni je idealnym dla uczenia przez wzmacnianie. Popychasz wózek w lewo lub w prawo, a prawa fizyki decydują, czy przymocowany drążek pozostanie w równowadze, czy się przewróci. W każdym kroku czasowym Twój agent podejmuje decyzję, a Ty masz satysfakcję z obserwowania, jak Twój algorytm stopniowo opanowuje zadanie.
+
+:::note[Więcej niż podstawy]
+<details>
+    <summary>Co sprawia, że to wyzwanie jest wyjątkowe?</summary>
+
+    Cart-pole przetrwało jako wzorzec testowy, ponieważ znajduje się w idealnym punkcie między trywialnością a przytłaczającą złożonością:
+
+    - Możesz obserwować postępy swojego agenta w czasie rzeczywistym
+    - Fizyka jest intuicyjna, ale opanowanie kontroli nie jest łatwe
+    - Trening kończy się szybko (minuty, nie godziny)
+    - Sukces jest jednoznaczny - albo drążek pozostaje w górze, albo nie
+    - Techniki przenoszą się bezpośrednio na bardziej złożone problemy sterowania
+
+</details>
+:::
+
+## Konfiguracja projektu
+
+Użyjemy [SciSharp/Gym.NET](https://github.com/SciSharp/Gym.NET) do dostarczenia symulowanego środowiska fizycznego.
+
+:::caution[Wymagany Windows]
+Ten przykład opiera się na Windows Forms do renderowania. Jeśli używasz innego systemu operacyjnego, dostępny jest renderer oparty na Avalonia dla Gym.NET, choć nie będziemy go tutaj omawiać. Alternatywnie, sprawdź nadchodzący przykład oparty na Godot, który działa na różnych platformach.
+:::
+
+Możesz podążać za instrukcją lub pobrać [kompletny projekt](https://github.com/asieradzk/RLMatrixGettingStartedExample3_CartPole), jeśli wolisz.
+
+Zainstalujmy niezbędne pakiety:
+
+```bash title="Instalacja niezbędnych pakietów"
+dotnet add package RLMatrix
+dotnet add package RLMatrix.Toolkit
+dotnet add package Gym.NET
+dotnet add package Gym.NET.Environments
+dotnet add package Gym.NET.Rendering.WinForm
+```
+
+## Budowanie środowiska
+
+Oto nasza implementacja środowiska cart-pole:
+
+```csharp title="CartPoleEnvironment.cs"
+using System;
+using System.Threading.Tasks;
+using Gym.Environments.Envs.Classic;
+using Gym.Rendering.WinForm;
+using RLMatrix.Toolkit;
+using NumSharp;
+
+namespace MyEnv
+{
+    [RLMatrixEnvironment]
+    public partial class CartPoleEnvironment
+    {
+        private CartPoleEnv myEnv;
+        private float[] myState;
+        private int stepCounter;
+        private const int MaxSteps = 100000;
+        private bool isDone;
+
+        public CartPoleEnvironment()
+        {
+            InitialiseAsync();
+        }
+
+        private void InitialiseAsync()
+        {
+            myEnv = new CartPoleEnv(WinFormEnvViewer.Factory);
+            ResetEnvironment();
+        }
+
+        [RLMatrixObservation]
+        public float GetCartPosition() => myState[0];
+
+        [RLMatrixObservation]
+        public float GetCartVelocity() => myState[1];
+
+        [RLMatrixObservation]
+        public float GetPoleAngle() => myState[2];
+
+        [RLMatrixObservation]
+        public float GetPoleAngularVelocity() => myState[3];
+
+        [RLMatrixActionDiscrete(2)]
+        public void ApplyForce(int action)
+        {
+            if (isDone)
+                ResetEnvironment();
+
+            var (observation, reward, done, _) = myEnv.Step(action);
+            myEnv.Render();
+            myState = ToFloatArray(observation);
+            isDone = done;
+            stepCounter++;
+
+            if (stepCounter > MaxSteps)
+                isDone = true;
+        }
+
+        private float[] ToFloatArray(NDArray npArray)
+        {
+            double[] doubleArray = npArray.ToArray<double>();
+            return Array.ConvertAll(doubleArray, item => (float)item);
+        }
+
+        [RLMatrixReward]
+        public float CalculateReward()
+        {
+            return isDone ? 0 : 1;
+        }
+
+        [RLMatrixDone]
+        public bool IsEpisodeFinished()
+        {
+            return isDone;
+        }
+
+        [RLMatrixReset]
+        public void ResetEnvironment()
+        {
+            myEnv.Reset();
+            myState = new float[4] { 0, 0, 0, 0 };
+            isDone = false;
+            stepCounter = 0;
+        }
+    }
+}
+```
+
+:::tip[Co się tutaj dzieje]
+Nasze środowisko udostępnia agentowi cztery informacje:
+- Pozycja i prędkość wózka
+- Kąt nachylenia drążka i jego prędkość kątowa
+
+Agent ma dwa możliwe ruchy: pchnięcie w lewo (0) lub pchnięcie w prawo (1).
+
+Za każdym razem, gdy agent popycha, wykonujemy krok symulacji fizycznej, odświeżamy okno i decydujemy, czy epizod powinien być kontynuowany. Przyznajemy nagrodę +1 za każdy krok czasowy, w którym drążek nie upada, zachęcając do dłuższych okresów utrzymywania równowagi.
+
+Wzorzec rozpakowywania krotki (`var (observation, reward, done, _) = myEnv.Step(action)`) jest odziedziczony z pythonowych korzeni Gym.NET. Chociaż działa, nie jest idealnie zgodny z filozofią projektową RLMatrix.
+:::
+
+## Konfiguracja treningu
+
+Teraz kod treningu, który nauczy naszego agenta równoważenia:
+
+```csharp title="Program.cs"
+using RLMatrix.Agents.Common;
+using RLMatrix;
+using MyEnv;
+
+Console.WriteLine("Starting cart-pole training...\n");
+
+// Konfiguracja parametrów uczenia
+var learningSetup = new PPOAgentOptions(
+    batchSize: 8,
+    ppoEpochs: 8,
+    memorySize: 1000,
+    gamma: 0.99f,
+    width: 128,
+    entropyCoefficient: 0.01f,
+    lr: 1E-02f
+);
+
+// Tworzenie środowiska i podłączenie do agenta
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+var env = new List<IEnvironmentAsync<float[]>> {
+    environment,
+    //new CartPoleEnvironment().RLInit() //odkomentuj, aby trenować z wieloma środowiskami
+};
+
+// Inicjalizacja agenta
+var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
+
+// Trenuj aż do zbieżności
+for (int i = 0; i < 100000; i++)
+{
+    await agent.Step();
+}
+
+Console.WriteLine("\nTraining complete!");
+Console.ReadLine();
+```
+
+Prosta nagroda +1 za każdy krok czasowy jest zaskakująco skuteczna. Algorytmy głębokiego uczenia przez wzmacnianie naturalnie optymalizują pod kątem długoterminowych korzyści, odkrywając, że subtelne, wyprzedzające korekty prowadzą do dłuższych czasów równoważenia i wyższych skumulowanych nagród.
+
+## PPO w RLMatrix: Co jest inne
+
+:::caution[Różnice implementacyjne]
+Implementacja PPO w RLMatrix jest zoptymalizowana pod kątem treningu rozproszonego, co powoduje pewne różnice w porównaniu z tym, co możesz zobaczyć w publikacjach naukowych lub innych frameworkach:
+
+<details>
+    <summary>Warto wiedzieć, jeśli porównujesz implementacje</summary>
+
+    1. **Interpretacja rozmiaru wsadu (batch size)**: W RLMatrix `batchSize` odnosi się do liczby kompletnych *epizodów* zbieranych przed aktualizacją modelu – a nie do liczby pojedynczych kroków, jak w wielu innych implementacjach.
+
+    2. **Uczenie zgodne z polityką (on-policy)**: PPO uczy się tylko z najnowszych doświadczeń używając bieżącej polityki, a następnie je odrzuca. Dlatego posiadanie większej liczby wsadów niż środowisk jest korzystne – daje algorytmowi bardziej zróżnicowane dane do nauki.
+
+    3. **Wielokrotne przejścia treningowe**: Parametr `ppoEpochs` kontroluje, ile przejść wykonujemy przez zebrane doświadczenia. Ponieważ później odrzucimy dane, chcemy wyciągnąć z nich maksymalną wartość poprzez wielokrotne przejścia.
+
+</details>
+:::
+
+Chociaż DQN (z naszych wcześniejszych tutoriali) może być bardziej efektywny pod względem wykorzystania próbek dla prostych zadań, PPO generalnie zapewnia bardziej stabilny trening bez konieczności rozległego dostrajania hiperparametrów. Sprawia to, że jest szczególnie dobrze przystosowany do trudnych problemów sterowania.
+
+## Sztuczka oszczędzająca pamięć, którą musisz znać
+
+Spójrz na tę linię w naszym kodzie treningowym:
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+```
+
+Ta niepozorna konfiguracja parametrów zawiera klucz do trenowania z bardzo długimi epizodami bez przeciążania pamięci GPU. Pozwól, że wyjaśnię:
+
+:::danger[Przełom w zarządzaniu pamięcią dla długich epizodów]
+Rozróżnienie między miękkimi i twardymi limitami epizodów rewolucjonizuje sposób, w jaki obsługujemy długie sesje treningowe:
+
+- **maxStepsHard**: Absolutny górny limit przed wymuszeniem resetu środowiska
+- **maxStepsSoft**: Kiedy przestać obliczać nagrody i gradienty, pozwalając fizyce kontynuować
+
+Ten mechanizm staje się nieoceniony, gdy twoje epizody mogą trwać tysiące kroków.
+:::
+
+Co się dzieje, gdy zmodyfikujemy te wartości?
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 200, maxStepsHard: 1200);
+```
+
+Teraz dzieje się magia:
+1. Zbieramy nagrody i obliczamy gradienty tylko dla pierwszych 200 kroków
+2. Symulacja kontynuuje naturalny bieg do 1200 kroków lub do niepowodzenia
+3. Zużycie pamięci GPU znacząco spada
+
+Kiedy uruchomisz tę konfigurację, sprawdź wykresy nagród – zauważysz, że żadna nagroda nie przekracza 200 (nasz miękki limit), mimo że fizyka cart-pole kontynuuje działanie poza tym punktem. Otwórz menedżer zadań i obserwuj oszczędność pamięci w czasie rzeczywistym.
+
+Ta technika staje się niezbędna dla złożonych środowisk, gdzie epizody mogą trwać w nieskończoność. Zamiast awarii z powodu błędów braku pamięci, kontrolujesz dokładnie, ile wysiłku obliczeniowego zainwestować, jednocześnie utrzymując naturalną dynamikę środowiska.
+
+## Obserwacja procesu uczenia
+
+Kiedy uruchomisz ten trening, pojawi się okno pokazujące środowisko cart-pole. Na początku drążek szybko się przewróci – twój agent nie ma pojęcia, co robi. Ale w ciągu kilku minut zobaczysz niezwykłą transformację:
+
+1. Początkowo agent wykonuje losowe ruchy bez żadnej strategii
+2. Następnie zaczyna reagować, gdy drążek już upada (za późno!)
+3. Stopniowo uczy się wykonywać ruchy korygujące coraz wcześniej
+4. W końcu wykonuje subtelne, wyprzedzające korekty, utrzymując drążek w idealnej równowadze
+
+Ta widoczna progresja sprawia, że cart-pole jest tak satysfakcjonującym przykładem uczenia. Nie widzisz tylko poprawy liczb na wykresie – obserwujesz, jak Twoja sztuczna inteligencja rozwija umiejętność na Twoich oczach.
+
+## Sprawdź swoje zrozumienie
+
+<Quiz
+    title="Zrozumienie uczenia przez wzmacnianie w przykładzie Cart-Pole"
+    questions={[
+        {
+            question: "Dlaczego Cart-Pole jest uważany za idealny przykład uczenia przez wzmacnianie?",
+            options: [
+                {
+                    text: "Wymaga minimalnych zasobów obliczeniowych w porównaniu z innymi problemami RL",
+                    correct: false,
+                    explanation: "Choć Cart-Pole jest mniej wymagający pod względem zasobów niż niektóre złożone środowiska, samouczek podkreśla inne powody jego wartości jako przykładu do nauki. Efektywność obliczeniowa nie jest jego główną zaletą."
+                },
+                {
+                    text: "Zapewnia wizualną informację zwrotną, gdzie możesz obserwować postęp umiejętności swojego agenta w czasie rzeczywistym",
+                    correct: true,
+                    explanation: "Dokładnie tak! Samouczek podkreśla ten wizualny aspekt jako to, co czyni Cart-Pole tak satysfakcjonującym: 'Nie widzisz tylko poprawy liczb na wykresie – obserwujesz, jak Twoja sztuczna inteligencja rozwija umiejętność na Twoich oczach.' Ta natychmiastowa, intuicyjna pętla informacji zwrotnej sprawia, że proces uczenia staje się namacalny."
+                },
+                {
+                    text: "To jedyny problem uczenia przez wzmacnianie z gwarantowanym optymalnym rozwiązaniem",
+                    correct: false,
+                    explanation: "Cart-Pole nie ma wyjątkowo gwarantowanego optymalnego rozwiązania w porównaniu z innymi problemami RL. Wiele zadań RL ma optymalne lub prawie optymalne rozwiązania. Wartość Cart-Pole leży gdzie indziej, szczególnie w jego intuicyjnej wizualnej informacji zwrotnej."
+                }
+            ],
+            hint: "Pomyśl, co sprawia, że Cart-Pole jest szczególnie satysfakcjonującym przykładem do nauki według samouczka."
+        },
+        {
+            question: "Jaką strategię nagród stosuje środowisko Cart-Pole, aby zachęcić agenta do równoważenia drążka?",
+            options: [
+                {
+                    text: "Duża pozytywna nagroda tylko wtedy, gdy drążek pozostaje idealnie pionowy",
+                    correct: false,
+                    explanation: "Środowisko nie nagradza specjalnie idealnej pionowości. Poszukiwanie absolutnej perfekcji stworzyłoby problem rzadkich nagród, co znacznie utrudniłoby uczenie."
+                },
+                {
+                    text: "Nagroda +1 za każdy krok czasowy, gdy drążek pozostaje w górze, 0 gdy upada",
+                    correct: true,
+                    explanation: "Poprawnie! Kod pokazuje, że `CalculateReward()` zwraca 1, gdy epizod trwa i 0, gdy się kończy. To proste podejście tworzy potężną zachętę: im dłużej drążek pozostaje w równowadze, tym więcej całkowitej nagrody otrzymuje agent, naturalnie zachęcając go do opanowania równoważenia."
+                },
+                {
+                    text: "Stopniowana nagroda oparta na tym, jak blisko drążek jest pionu (wyższa nagroda za bardziej pionowe ustawienie)",
+                    correct: false,
+                    explanation: "Chociaż to podejście mogłoby działać, nie jest to to, co stosuje nasza implementacja. Nasze środowisko używa prostszej binarnej nagrody: +1 za każdy przetrwany krok czasowy, niezależnie od dokładnego kąta, i 0, gdy epizod się kończy."
+                }
+            ],
+            hint: "Sprawdź metodę `CalculateReward()` w kodzie środowiska, aby zobaczyć dokładnie, jaka nagroda jest przyznawana i kiedy."
+        },
+        {
+            question: "Jaki jest cel ustawiania różnych wartości dla maxStepsSoft i maxStepsHard?",
+            options: [
+                {
+                    text: "Sztucznie zwiększyć szybkość uczenia poprzez przedwczesne kończenie epizodów",
+                    correct: false,
+                    explanation: "Nie chodzi tu o sztuczne przyspieszanie uczenia. W rzeczywistości epizody nadal mogą trwać do naturalnego zakończenia, aż do maxStepsHard. Rozróżnienie służy innemu celowi związanemu z efektywnością obliczeniową."
+                },
+                {
+                    text: "Zmniejszyć zużycie pamięci GPU poprzez ograniczenie obliczeń nagród, jednocześnie pozwalając na naturalną progresję środowiska",
+                    correct: true,
+                    explanation: "Zgadza się! Jak wyjaśnia samouczek, ta technika pozwala 'kontrolować dokładnie, ile wysiłku obliczeniowego zainwestować, jednocześnie utrzymując naturalną dynamikę środowiska.' Zbierasz nagrody i gradienty tylko do maxStepsSoft, ale symulacja kontynuuje się naturalnie aż do maxStepsHard, znacząco zmniejszając zużycie pamięci dla długich epizodów."
+                },
+                {
+                    text: "Stworzyć program nauczania, gdzie agent najpierw uczy się krótkich epizodów, zanim zajmie się dłuższymi",
+                    correct: false,
+                    explanation: "Chociaż uczenie programowe jest ważną techniką RL, nie to jest celem limitów soft/hard. Te parametry nie zwiększają stopniowo długości epizodu - zarządzają zasobami obliczeniowymi, jednocześnie utrzymując naturalne zachowanie środowiska."
+                }
+            ],
+            hint: "Zastanów się, co dzieje się z pamięcią GPU, gdy epizody stają się bardzo długie i jak ta konfiguracja parametrów pomaga rozwiązać ten problem."
+        },
+        {
+            question: "Jak interpretacja parametru batchSize w PPO w RLMatrix różni się od standardowych implementacji?",
+            options: [
+                {
+                    text: "Odnosi się do liczby kompletnych epizodów zbieranych przed aktualizacją modelu, a nie pojedynczych kroków",
+                    correct: true,
+                    explanation: "Dokładnie tak! Samouczek wyraźnie wskazuje na tę różnicę: 'W RLMatrix batchSize odnosi się do liczby kompletnych epizodów zbieranych przed aktualizacją modelu – a nie do liczby pojedynczych kroków, jak w wielu innych implementacjach.' To ważne rozróżnienie przy konfiguracji treningu."
+                },
+                {
+                    text: "Określa rozmiar ukrytych warstw sieci neuronowej",
+                    correct: false,
+                    explanation: "Rozmiar wsadu nie określa architektury sieci neuronowej. W RLMatrix parametr 'width' kontroluje rozmiar ukrytych warstw. Rozmiar wsadu zamiast tego odnosi się do ilości doświadczenia zbieranego przed aktualizacjami uczenia."
+                },
+                {
+                    text: "Kontroluje, ile kroków treningowych wykonać przed oceną agenta",
+                    correct: false,
+                    explanation: "To nie jest to, co oznacza rozmiar wsadu w implementacji PPO w RLMatrix. Rozmiar wsadu odnosi się konkretnie do zbierania danych do uczenia, a nie do harmonogramu oceny."
+                }
+            ],
+            hint: "Samouczek zawiera specjalną sekcję wyjaśniającą różnice w implementacji PPO w RLMatrix - sprawdź, co mówi o interpretacji rozmiaru wsadu."
+        },
+        {
+            question: "Jaką transformację zachowania agenta można oczekiwać w miarę postępu treningu?",
+            options: [
+                {
+                    text: "Agent będzie rozwijał coraz bardziej złożone wzorce ruchu, które wydają się losowe, ale utrzymują równowagę",
+                    correct: false,
+                    explanation: "Skuteczni agenci zazwyczaj nie rozwijają ruchów wyglądających na losowe. Progresja zmierza raczej w kierunku subtelnej, celowej kontroli, a nie złożonych czy chaotycznych wzorców."
+                },
+                {
+                    text: "Agent będzie przechodził od losowych ruchów, przez reaktywne korekty, do wyprzedzających dostosowań",
+                    correct: true,
+                    explanation: "Dokładnie tak, jak opisano w samouczku! Agent przechodzi przez tę progresję: losowe ruchy → reaktywne korekty (gdy drążek już upada) → wcześniejsze interwencje → subtelne wyprzedzające dostosowania. To pokazuje, jak uczy się przewidywać problemy, a nie tylko na nie reagować."
+                },
+                {
+                    text: "Agent nauczy się utrzymywać wózek idealnie wycentrowany na ekranie przez cały czas",
+                    correct: false,
+                    explanation: "Centrowanie wózka niekoniecznie jest optymalną strategią. Celem jest utrzymanie drążka w równowadze, co może wiązać się ze strategicznym przemieszczaniem wózka. Idealne centrowanie nie jest wymienione jako część oczekiwanej progresji zachowania."
+                }
+            ],
+            hint: "Samouczek przedstawia konkretną progresję zachowania, którą zaobserwujesz podczas uczenia się agenta. Poszukaj listy numerowanej opisującej tę transformację."
+        }
+    ]}
+/>
+
+## Następne kroki
+
+W tym samouczku:
+- Skonfigurowałeś symulację fizyki w czasie rzeczywistym dla uczenia przez wzmacnianie
+- Zaimplementowałeś kompletnego agenta do opanowania klasycznego problemu sterowania
+- Nauczyłeś się efektywnie zarządzać pamięcią za pomocą sztuczki z miękkim/twardym zakończeniem
+- Zrozumiałeś, jak implementacja PPO w RLMatrix różni się od standardowych
+
+Następnie zaimplementujemy to samo środowisko bez używania zestawu narzędzi, co da Ci wgląd w to, co dzieje się za tymi eleganckimi atrybutami, których używaliśmy.
+
+<LinkCard
+    title="Cart-Pole bez Toolkit"
+    description="Zobacz, co dzieje się pod maską, implementując cart-pole bez abstrakcji toolkit."
+    href="/beginner/cartpolenotoolkit/"
+/>
