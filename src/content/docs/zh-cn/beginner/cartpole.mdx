@@ -1,0 +1,394 @@
+---
+title: 小车-杆平衡示例
+description: 学习使用强化学习在移动小车上平衡一根杆子
+---
+
+import Quiz from '@/components/Quiz.astro';
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+准备好亲眼见证强化学习的实际应用了吗？在本教程中，我们将挑战经典的平衡任务，你将观察到AI如何学会在移动小车上保持一根杆子直立。
+
+<video autoplay loop muted playsinline width="100%" style="cursor: pointer;" onclick="this.paused ? this.play() : this.pause();">
+    <source src="/images/cartpole/cartpole.mp4" type="video/mp4" />
+    <source src="/images/cartpole/cartpole.webm" type="video/webm" />
+    您的浏览器不支持HTML5视频。
+</video>
+
+小车-杆平衡挑战结合了简单性和视觉反馈，使其成为强化学习的完美示例。你向左或向右推动小车，物理定律决定了附着的杆子是保持平衡还是倒下。每个时间步，你的智能体做出决策，而你可以满意地观察你的算法如何逐渐掌握这项任务。
+
+:::note[超越基础]
+<details>
+    <summary>是什么让这个挑战如此特别？</summary>
+
+    小车-杆平衡之所以能作为基准测试经久不衰，是因为它恰好处于简单和复杂之间的甜蜜点：
+
+    - 你可以实时观察智能体的进步
+    - 物理原理直观，但掌握控制并不容易
+    - 训练快速完成（分钟级，而非小时级）
+    - 成功标准明确 - 杆子要么保持直立，要么倒下
+    - 这些技术可直接应用于更复杂的控制问题
+
+</details>
+:::
+
+## 项目设置
+
+我们将使用[SciSharp/Gym.NET](https://github.com/SciSharp/Gym.NET)提供模拟物理环境。
+
+:::caution[需要Windows系统]
+本示例依赖Windows Forms进行渲染。如果您使用其他操作系统，Gym.NET有基于Avalonia的渲染器可用，不过我们不会在此处介绍。或者，您可以查看即将推出的基于Godot的跨平台示例。
+:::
+
+您可以跟随教程操作，也可以下载[完整项目](https://github.com/asieradzk/RLMatrixGettingStartedExample3_CartPole)。
+
+让我们安装必要的包：
+
+```bash title="安装必要的包"
+dotnet add package RLMatrix
+dotnet add package RLMatrix.Toolkit
+dotnet add package Gym.NET
+dotnet add package Gym.NET.Environments
+dotnet add package Gym.NET.Rendering.WinForm
+```
+
+## 构建环境
+
+以下是我们的小车-杆环境实现：
+
+```csharp title="CartPoleEnvironment.cs"
+using System;
+using System.Threading.Tasks;
+using Gym.Environments.Envs.Classic;
+using Gym.Rendering.WinForm;
+using RLMatrix.Toolkit;
+using NumSharp;
+
+namespace MyEnv
+{
+    [RLMatrixEnvironment]
+    public partial class CartPoleEnvironment
+    {
+        private CartPoleEnv myEnv;
+        private float[] myState;
+        private int stepCounter;
+        private const int MaxSteps = 100000;
+        private bool isDone;
+
+        public CartPoleEnvironment()
+        {
+            InitialiseAsync();
+        }
+
+        private void InitialiseAsync()
+        {
+            myEnv = new CartPoleEnv(WinFormEnvViewer.Factory);
+            ResetEnvironment();
+        }
+
+        [RLMatrixObservation]
+        public float GetCartPosition() => myState[0];
+
+        [RLMatrixObservation]
+        public float GetCartVelocity() => myState[1];
+
+        [RLMatrixObservation]
+        public float GetPoleAngle() => myState[2];
+
+        [RLMatrixObservation]
+        public float GetPoleAngularVelocity() => myState[3];
+
+        [RLMatrixActionDiscrete(2)]
+        public void ApplyForce(int action)
+        {
+            if (isDone)
+                ResetEnvironment();
+
+            var (observation, reward, done, _) = myEnv.Step(action);
+            myEnv.Render();
+            myState = ToFloatArray(observation);
+            isDone = done;
+            stepCounter++;
+
+            if (stepCounter > MaxSteps)
+                isDone = true;
+        }
+
+        private float[] ToFloatArray(NDArray npArray)
+        {
+            double[] doubleArray = npArray.ToArray<double>();
+            return Array.ConvertAll(doubleArray, item => (float)item);
+        }
+
+        [RLMatrixReward]
+        public float CalculateReward()
+        {
+            return isDone ? 0 : 1;
+        }
+
+        [RLMatrixDone]
+        public bool IsEpisodeFinished()
+        {
+            return isDone;
+        }
+
+        [RLMatrixReset]
+        public void ResetEnvironment()
+        {
+            myEnv.Reset();
+            myState = new float[4] { 0, 0, 0, 0 };
+            isDone = false;
+            stepCounter = 0;
+        }
+    }
+}
+```
+
+:::tip[这里发生了什么]
+我们的环境向智能体提供了四条信息：
+- 小车的位置和速度
+- 杆子的角度及其旋转速度
+
+智能体有两种可能的动作：向左推（0）或向右推（1）。
+
+每次智能体推动时，我们推进物理模拟，重绘窗口，并决定是否继续该回合。我们为每个存活的时间步提供+1奖励，鼓励更长的平衡时间。
+
+元组解包模式（`var (observation, reward, done, _) = myEnv.Step(action)`）继承自Gym.NET的Python起源。虽然它可以工作，但并不完全符合RLMatrix的设计理念。
+:::
+
+## 设置训练
+
+现在是教导我们的智能体平衡的训练代码：
+
+```csharp title="Program.cs"
+using RLMatrix.Agents.Common;
+using RLMatrix;
+using MyEnv;
+
+Console.WriteLine("Starting cart-pole training...\n");
+
+// 配置学习参数
+var learningSetup = new PPOAgentOptions(
+    batchSize: 8,
+    ppoEpochs: 8,
+    memorySize: 1000,
+    gamma: 0.99f,
+    width: 128,
+    entropyCoefficient: 0.01f,
+    lr: 1E-02f
+);
+
+// 创建环境并连接到智能体
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+var env = new List<IEnvironmentAsync<float[]>> {
+    environment,
+    //new CartPoleEnvironment().RLInit() //取消注释可使用多环境训练
+};
+
+// 初始化智能体
+var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
+
+// 训练直至收敛
+for (int i = 0; i < 100000; i++)
+{
+    await agent.Step();
+}
+
+Console.WriteLine("\nTraining complete!");
+Console.ReadLine();
+```
+
+每时间步+1的简单奖励出奇地有效。深度强化学习算法自然会优化长期目标，发现微妙、预防性的调整能导致更长的平衡时间和更高的累积奖励。
+
+## RLMatrix中的PPO：有何不同
+
+:::caution[实现差异]
+RLMatrix的PPO实现针对分布式训练进行了优化，这与研究论文或其他框架中的实现有一些不同：
+
+<details>
+    <summary>比较实现时值得了解的点</summary>
+
+    1. **批大小解释**：在RLMatrix中，`batchSize`指的是更新模型前收集的完整*回合*数量 – 而不是许多其他实现中的单个步骤数量。
+
+    2. **在策略一致性**：PPO只从当前策略收集的经验中学习。在更新前收集多个完整回合有助于创建稳定的梯度估计，并在不引入回合中途更新策略会导致的离策略错误的情况下捕捉更多环境动态。
+
+    3. **多次训练通过**：`ppoEpochs`参数控制我们对收集的经验进行多少次通过。由于之后我们会丢弃数据，我们希望通过多次通过从中提取最大价值。
+
+</details>
+:::
+
+虽然DQN（我们早期教程中的算法）对简单任务可能更具样本效率，但PPO通常提供更稳定的训练，无需大量超参数调整。这使其特别适合具有挑战性的控制问题。
+
+## 你需要知道的内存节省技巧
+
+看看我们训练代码中的这一行：
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+```
+
+这个看似普通的参数配置包含了在不让GPU内存不堪重负的情况下进行非常长回合训练的关键。让我解释：
+
+:::danger[长回合的内存突破]
+软硬回合限制的区别彻底革新了我们处理长时间训练回合的方式：
+
+- **maxStepsHard**：强制环境重置前的绝对上限
+- **maxStepsSoft**：停止计算奖励和梯度的时间点，同时让物理模拟继续运行
+
+当您的回合可能运行数千步时，这种机制变得非常有价值。
+:::
+
+当我们修改这些值时会发生什么？
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 200, maxStepsHard: 1200);
+```
+
+现在神奇的事情发生了：
+1. 我们只对前200步累积奖励并计算梯度
+2. 模拟继续自然运行到1200步或直到失败
+3. GPU内存使用大幅下降
+
+当您运行此配置时，查看您的奖励图表 – 您会注意到没有奖励超过200（我们的软限制），尽管小车-杆物理模拟在该点之后仍在继续。打开任务管理器，实时观察内存节省情况。
+
+这种技术对于回合可能无限运行的复杂环境变得不可或缺。与其因内存不足错误而崩溃，您可以精确控制投入多少计算努力，同时保持自然的环境动态。
+
+## 观察学习过程
+
+当您运行此训练时，会弹出一个显示小车-杆环境的窗口。一开始，杆子会迅速倒下 – 您的智能体完全不知道该怎么做。但在几分钟内，您将见证一个非凡的转变：
+
+1. 最初，智能体做出随机移动，没有策略
+2. 然后它开始在杆子已经倒下时反应（太晚了！）
+3. 它逐渐学会更早做出纠正动作
+4. 最终，它做出微妙的预防性调整，使杆子保持完美平衡
+
+这种可见的进展是什么使小车-杆作为学习示例如此令人满意。您不仅仅是看到图表上的数字改善 – 您正在亲眼目睹您的AI发展技能。
+
+## 测试您的理解
+
+<Quiz
+    title="理解小车-杆强化学习"
+    questions={[
+        {
+            question: "为什么小车-杆被认为是理想的强化学习示例？",
+            options: [
+                {
+                    text: "与其他RL问题相比，它需要最少的计算资源",
+                    correct: false,
+                    explanation: "虽然小车-杆比某些复杂环境的资源消耗更少，但教程强调了它作为学习示例的价值有不同的原因。计算效率并不是它的主要优势。"
+                },
+                {
+                    text: "它提供了视觉反馈，让您可以实时观察智能体的技能进展",
+                    correct: true,
+                    explanation: "完全正确！教程强调了这一视觉方面是什么使小车-杆如此令人满意：'您不仅仅是看到图表上的数字改善 – 您正在亲眼目睹您的AI发展技能。'这种即时、直观的反馈循环使学习过程变得触手可及。"
+                },
+                {
+                    text: "它是唯一一个具有保证最优解的强化学习问题",
+                    correct: false,
+                    explanation: "与其他RL问题相比，小车-杆并没有独特的保证最优解。许多RL任务都有最优或近似最优的解决方案。小车-杆的价值在别处，特别是在其直观的视觉反馈中。"
+                }
+            ],
+            hint: "思考根据教程，是什么让小车-杆作为学习示例特别令人满意。"
+        },
+        {
+            question: "小车-杆环境使用什么奖励策略来鼓励智能体平衡杆子？",
+            options: [
+                {
+                    text: "仅当杆子保持完全垂直时给予大幅正奖励",
+                    correct: false,
+                    explanation: "环境并不特别奖励完美的垂直性。寻求绝对完美会创造稀疏奖励问题，使学习变得更加困难。"
+                },
+                {
+                    text: "杆子每保持直立一个时间步给予+1奖励，倒下时给0",
+                    correct: true,
+                    explanation: "正确！代码显示`CalculateReward()`在回合继续时返回1，结束时返回0。这种简单方法创造了强大的激励：杆子保持平衡的时间越长，智能体获得的总奖励越多，自然鼓励它掌握平衡技能。"
+                },
+                {
+                    text: "基于杆子与垂直位置的接近程度给予分级奖励（越垂直奖励越高）",
+                    correct: false,
+                    explanation: "虽然这种方法可行，但不是我们实现所使用的。我们的环境使用更简单的二元奖励：每个存活时间步+1，不考虑确切角度，回合结束时为0。"
+                }
+            ],
+            hint: "查看环境代码中的`CalculateReward()`方法，看看确切给予什么奖励以及何时给予。"
+        },
+        {
+            question: "设置不同的maxStepsSoft和maxStepsHard值的目的是什么？",
+            options: [
+                {
+                    text: "通过提前结束回合来人为加快学习速度",
+                    correct: false,
+                    explanation: "这不是为了人为加速学习。实际上，回合仍然可以运行到maxStepsHard的自然结束。这种区分服务于与计算效率相关的不同目的。"
+                },
+                {
+                    text: "通过限制奖励计算同时允许环境自然进展来减少GPU内存使用",
+                    correct: true,
+                    explanation: "没错！正如教程解释的，这种技术让您'在保持自然环境动态的同时精确控制投入多少计算努力。'您只在maxStepsSoft之前累积奖励和梯度，但模拟继续自然运行到maxStepsHard，显著减少长回合的内存使用。"
+                },
+                {
+                    text: "创建一个课程，让智能体先学习短回合再处理更长的回合",
+                    correct: false,
+                    explanation: "虽然课程学习是有效的RL技术，但这不是软/硬步数限制的设计目的。这些参数不会逐渐增加回合长度 - 它们管理计算资源同时保持自然环境行为。"
+                }
+            ],
+            hint: "考虑当回合变得非常长时GPU内存会发生什么，以及这种参数配置如何帮助解决这个问题。"
+        },
+        {
+            question: "RLMatrix对PPO的batchSize参数的解释与标准实现有何不同？",
+            options: [
+                {
+                    text: "它指的是更新模型前收集的完整回合数量，而不是单个步骤",
+                    correct: true,
+                    explanation: "完全正确！教程明确指出了这一差异：'在RLMatrix中，batchSize指的是更新模型前收集的完整回合数量 – 而不是许多其他实现中的单个步骤数量。'这是配置训练时的重要区别。"
+                },
+                {
+                    text: "它决定神经网络隐藏层的大小",
+                    correct: false,
+                    explanation: "批大小不决定神经网络架构。在RLMatrix中，'width'参数控制隐藏层的大小。批大小而是与学习更新前收集多少经验有关。"
+                },
+                {
+                    text: "它控制在评估智能体前执行多少训练步骤",
+                    correct: false,
+                    explanation: "这不是RLMatrix的PPO实现中批大小的含义。批大小特别与学习的数据收集有关，而不是评估计划。"
+                }
+            ],
+            hint: "教程有一个特定部分解释RLMatrix的PPO实现差异 - 查看它对批大小解释的说明。"
+        },
+        {
+            question: "随着训练的进行，您预期在智能体行为中看到什么转变？",
+            options: [
+                {
+                    text: "智能体将发展出越来越复杂的看似随机但能保持平衡的移动模式",
+                    correct: false,
+                    explanation: "成功的智能体通常不会发展出看似随机的移动。进展趋向于微妙、有目的的控制，而不是复杂或混乱的模式。"
+                },
+                {
+                    text: "智能体将从随机移动进展到反应性修正，再到预防性调整",
+                    correct: true,
+                    explanation: "正如教程所描述的！智能体遵循这种进展：随机移动→反应性修正（当杆子已经倒下时）→更早的干预→微妙的预防性调整。这显示了它如何学会预测问题而不仅仅是对问题做出反应。"
+                },
+                {
+                    text: "智能体将学会始终保持小车在屏幕中央的位置",
+                    correct: false,
+                    explanation: "保持小车居中不一定是最佳策略。目标是保持杆子平衡，这可能涉及战略性地移动小车。完美居中没有被提及为预期行为进展的一部分。"
+                }
+            ],
+            hint: "教程概述了一个您将随着智能体学习观察到的特定行为进展。寻找描述这种转变的编号列表。"
+        }
+    ]}
+/>
+
+## 下一步
+
+在本教程中，您已经：
+- 为强化学习设置了实时物理模拟
+- 实现了一个完整的智能体来掌握经典控制问题
+- 学习了如何使用软/硬终止技巧高效管理内存
+- 了解了RLMatrix的PPO实现与标准实现的不同之处
+
+接下来，我们将不使用工具包实现相同的环境，让您深入了解那些整洁属性背后发生的事情。
+
+<LinkCard
+    title="不使用工具包的小车-杆"
+    description="通过不使用工具包抽象实现小车-杆来了解幕后发生的事情。"
+    href="/beginner/cartpolenotoolkit/"
+/>

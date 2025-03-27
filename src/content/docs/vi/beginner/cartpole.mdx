@@ -1,0 +1,394 @@
+---
+title: Ví dụ Cartpole
+description: Học cách cân bằng một thanh trên xe di chuyển bằng học tăng cường
+---
+
+import Quiz from '@/components/Quiz.astro';
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+Bạn đã sẵn sàng để xem học tăng cường trong hành động? Trong hướng dẫn này, chúng ta sẽ thử thách với bài toán cân bằng cổ điển, nơi bạn sẽ theo dõi AI của mình học cách giữ cho một thanh đứng thẳng trên một chiếc xe di chuyển.
+
+<video autoplay loop muted playsinline width="100%" style="cursor: pointer;" onclick="this.paused ? this.play() : this.pause();">
+    <source src="/images/cartpole/cartpole.mp4" type="video/mp4" />
+    <source src="/images/cartpole/cartpole.webm" type="video/webm" />
+    Trình duyệt của bạn không hỗ trợ video HTML5.
+</video>
+
+Thử thách cartpole kết hợp sự đơn giản với phản hồi trực quan, làm cho nó trở thành lý tưởng cho học tăng cường. Bạn đẩy xe sang trái hoặc phải, và vật lý sẽ quyết định liệu thanh gắn trên đó có giữ được thăng bằng hay sẽ đổ. Mỗi bước thời gian, tác tử (agent) của bạn đưa ra quyết định, và bạn có sự hài lòng khi xem thuật toán của mình dần dần thành thạo nhiệm vụ.
+
+:::note[Vượt qua cơ bản]
+<details>
+    <summary>Điều gì làm cho thử thách này đặc biệt?</summary>
+
+    Cartpole đã tồn tại như một tiêu chuẩn đo lường bởi vì nó nằm ở vị trí vừa phải giữa quá tầm thường và quá phức tạp:
+
+    - Bạn có thể xem tác tử cải thiện theo thời gian thực
+    - Vật lý rất trực quan nhưng việc làm chủ kiểm soát thì không
+    - Huấn luyện hoàn thành nhanh chóng (phút, không phải giờ)
+    - Thành công rõ ràng - hoặc là thanh vẫn đứng hoặc không
+    - Các kỹ thuật áp dụng trực tiếp cho các vấn đề kiểm soát phức tạp hơn
+
+</details>
+:::
+
+## Thiết lập dự án của bạn
+
+Chúng ta sẽ sử dụng [SciSharp/Gym.NET](https://github.com/SciSharp/Gym.NET) để cung cấp môi trường vật lý mô phỏng.
+
+:::caution[Yêu cầu Windows]
+Ví dụ này phụ thuộc vào Windows Forms để hiển thị. Nếu bạn đang sử dụng hệ điều hành khác, có một trình hiển thị dựa trên Avalonia có sẵn cho Gym.NET, mặc dù chúng tôi sẽ không đề cập đến nó ở đây. Ngoài ra, hãy xem ví dụ dựa trên Godot sắp tới hoạt động trên nhiều nền tảng.
+:::
+
+Bạn có thể làm theo hoặc tải [dự án hoàn chỉnh](https://github.com/asieradzk/RLMatrixGettingStartedExample3_CartPole) nếu bạn thích.
+
+Hãy cài đặt các gói cần thiết:
+
+```bash title="Cài đặt các gói cần thiết"
+dotnet add package RLMatrix
+dotnet add package RLMatrix.Toolkit
+dotnet add package Gym.NET
+dotnet add package Gym.NET.Environments
+dotnet add package Gym.NET.Rendering.WinForm
+```
+
+## Xây dựng môi trường
+
+Đây là cách triển khai môi trường cartpole của chúng ta:
+
+```csharp title="CartPoleEnvironment.cs"
+using System;
+using System.Threading.Tasks;
+using Gym.Environments.Envs.Classic;
+using Gym.Rendering.WinForm;
+using RLMatrix.Toolkit;
+using NumSharp;
+
+namespace MyEnv
+{
+    [RLMatrixEnvironment]
+    public partial class CartPoleEnvironment
+    {
+        private CartPoleEnv myEnv;
+        private float[] myState;
+        private int stepCounter;
+        private const int MaxSteps = 100000;
+        private bool isDone;
+
+        public CartPoleEnvironment()
+        {
+            InitialiseAsync();
+        }
+
+        private void InitialiseAsync()
+        {
+            myEnv = new CartPoleEnv(WinFormEnvViewer.Factory);
+            ResetEnvironment();
+        }
+
+        [RLMatrixObservation]
+        public float GetCartPosition() => myState[0];
+
+        [RLMatrixObservation]
+        public float GetCartVelocity() => myState[1];
+
+        [RLMatrixObservation]
+        public float GetPoleAngle() => myState[2];
+
+        [RLMatrixObservation]
+        public float GetPoleAngularVelocity() => myState[3];
+
+        [RLMatrixActionDiscrete(2)]
+        public void ApplyForce(int action)
+        {
+            if (isDone)
+                ResetEnvironment();
+
+            var (observation, reward, done, _) = myEnv.Step(action);
+            myEnv.Render();
+            myState = ToFloatArray(observation);
+            isDone = done;
+            stepCounter++;
+
+            if (stepCounter > MaxSteps)
+                isDone = true;
+        }
+
+        private float[] ToFloatArray(NDArray npArray)
+        {
+            double[] doubleArray = npArray.ToArray<double>();
+            return Array.ConvertAll(doubleArray, item => (float)item);
+        }
+
+        [RLMatrixReward]
+        public float CalculateReward()
+        {
+            return isDone ? 0 : 1;
+        }
+
+        [RLMatrixDone]
+        public bool IsEpisodeFinished()
+        {
+            return isDone;
+        }
+
+        [RLMatrixReset]
+        public void ResetEnvironment()
+        {
+            myEnv.Reset();
+            myState = new float[4] { 0, 0, 0, 0 };
+            isDone = false;
+            stepCounter = 0;
+        }
+    }
+}
+```
+
+:::tip[Điều gì đang diễn ra ở đây]
+Môi trường của chúng ta cung cấp cho tác tử bốn thông tin:
+- Vị trí và vận tốc của xe
+- Góc nghiêng của thanh và tốc độ quay của nó
+
+Tác tử có hai hành động có thể: đẩy sang trái (0) hoặc đẩy sang phải (1).
+
+Mỗi lần tác tử đẩy, chúng ta tiến hành mô phỏng vật lý, vẽ lại cửa sổ, và quyết định xem tập (episode) có nên tiếp tục hay không. Chúng ta trao thưởng +1 cho mỗi bước thời gian sống sót, khuyến khích thời gian cân bằng lâu hơn.
+
+Mẫu mở gói tuple (`var (observation, reward, done, _) = myEnv.Step(action)`) được kế thừa từ nguồn gốc Python của Gym.NET. Mặc dù nó hoạt động, nhưng nó không hoàn toàn phù hợp với triết lý thiết kế của RLMatrix.
+:::
+
+## Thiết lập huấn luyện
+
+Bây giờ đến mã huấn luyện sẽ dạy tác tử của chúng ta cách cân bằng:
+
+```csharp title="Program.cs"
+using RLMatrix.Agents.Common;
+using RLMatrix;
+using MyEnv;
+
+Console.WriteLine("Starting cart-pole training...\n");
+
+// Cấu hình tham số học
+var learningSetup = new PPOAgentOptions(
+    batchSize: 8,
+    ppoEpochs: 8,
+    memorySize: 1000,
+    gamma: 0.99f,
+    width: 128,
+    entropyCoefficient: 0.01f,
+    lr: 1E-02f
+);
+
+// Tạo môi trường và gắn vào tác tử
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+var env = new List<IEnvironmentAsync<float[]>> {
+    environment,
+    //new CartPoleEnvironment().RLInit() //bỏ chú thích để huấn luyện với nhiều môi trường
+};
+
+// Khởi tạo tác tử
+var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
+
+// Huấn luyện đến khi hội tụ
+for (int i = 0; i < 100000; i++)
+{
+    await agent.Step();
+}
+
+Console.WriteLine("\nTraining complete!");
+Console.ReadLine();
+```
+
+Phần thưởng đơn giản +1 cho mỗi bước thời gian mạnh mẽ một cách đáng ngạc nhiên. Các thuật toán học tăng cường sâu tự nhiên tối ưu hóa cho trò chơi dài, hiểu rằng những điều chỉnh tinh tế, chủ động dẫn đến thời gian cân bằng lâu hơn và phần thưởng tích lũy cao hơn.
+
+## PPO trong RLMatrix: Điều gì khác biệt
+
+:::caution[Sự khác biệt trong triển khai]
+Triển khai PPO của RLMatrix được tối ưu hóa cho huấn luyện phân tán, tạo ra một số khác biệt so với những gì bạn có thể thấy trong các bài báo nghiên cứu hoặc các framework khác:
+
+<details>
+    <summary>Đáng biết nếu bạn đang so sánh các triển khai</summary>
+
+    1. **Diễn giải kích thước batch**: Trong RLMatrix, `batchSize` đề cập đến số lượng *tập* hoàn chỉnh cần thu thập trước khi cập nhật mô hình – không phải số lượng bước riêng lẻ như trong nhiều triển khai khác.
+
+    2. **Tính nhất quán On-Policy**: PPO chỉ học từ những kinh nghiệm được thu thập dưới chính sách hiện tại. Việc thu thập nhiều tập hoàn chỉnh trước khi cập nhật giúp tạo ra ước tính gradient ổn định và nắm bắt nhiều động lực môi trường hơn mà không đưa vào các lỗi off-policy có thể xảy ra khi cập nhật chính sách giữa tập.
+
+    3. **Nhiều lượt huấn luyện**: Tham số `ppoEpochs` kiểm soát chúng ta thực hiện bao nhiêu lượt qua kinh nghiệm đã thu thập. Vì chúng ta sẽ loại bỏ dữ liệu sau đó, chúng ta muốn trích xuất giá trị tối đa từ nó với nhiều lượt.
+
+</details>
+:::
+
+Trong khi DQN (từ các hướng dẫn trước đây của chúng ta) có thể hiệu quả hơn về mẫu cho các tác vụ đơn giản, PPO thường mang lại quá trình huấn luyện ổn định hơn mà không đòi hỏi điều chỉnh siêu tham số rộng rãi. Điều này làm cho nó đặc biệt phù hợp cho các vấn đề kiểm soát đầy thách thức.
+
+## Kỹ thuật tiết kiệm bộ nhớ bạn cần biết
+
+Hãy nhìn vào dòng này trong mã huấn luyện của chúng ta:
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+```
+
+Cấu hình tham số tưởng chừng như vô hại này chứa chìa khóa để huấn luyện với các tập rất dài mà không làm quá tải bộ nhớ GPU của bạn. Hãy để tôi giải thích:
+
+:::danger[Đột phá bộ nhớ cho các tập dài]
+Sự phân biệt giữa giới hạn tập mềm và cứng cách mạng hóa cách chúng ta xử lý các tập huấn luyện dài:
+
+- **maxStepsHard**: Giới hạn tuyệt đối trước khi buộc phải đặt lại môi trường
+- **maxStepsSoft**: Khi nào dừng tính toán phần thưởng và gradient, nhưng vẫn để vật lý tiếp tục
+
+Cơ chế này trở nên vô giá khi các tập của bạn có thể chạy hàng nghìn bước.
+:::
+
+Điều gì xảy ra khi chúng ta sửa đổi các giá trị này?
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 200, maxStepsHard: 1200);
+```
+
+Bây giờ điều kỳ diệu xảy ra:
+1. Chúng ta chỉ tích lũy phần thưởng và tính toán gradient cho 200 bước đầu tiên
+2. Mô phỏng tiếp tục chạy tự nhiên lên đến 1200 bước hoặc cho đến khi thất bại
+3. Sử dụng bộ nhớ GPU của bạn giảm đáng kể
+
+Khi bạn chạy cấu hình này, hãy kiểm tra biểu đồ phần thưởng – bạn sẽ nhận thấy không có phần thưởng nào vượt quá 200 (giới hạn mềm của chúng ta), mặc dù vật lý cartpole vẫn tiếp tục sau điểm đó. Mở trình quản lý tác vụ và xem việc tiết kiệm bộ nhớ theo thời gian thực.
+
+Kỹ thuật này trở nên không thể thiếu đối với các môi trường phức tạp, nơi các tập có thể chạy vô thời hạn. Thay vì gặp sự cố với lỗi hết bộ nhớ, bạn kiểm soát chính xác mức độ nỗ lực tính toán để đầu tư trong khi vẫn duy trì động lực môi trường tự nhiên.
+
+## Xem quá trình học trong hành động
+
+Khi bạn chạy quá trình huấn luyện này, một cửa sổ sẽ hiện lên hiển thị môi trường cartpole. Ban đầu, thanh sẽ đổ nhanh chóng – tác tử của bạn không biết nó đang làm gì. Nhưng trong vòng vài phút, bạn sẽ chứng kiến một sự chuyển đổi đáng kinh ngạc:
+
+1. Ban đầu, tác tử thực hiện các chuyển động ngẫu nhiên không có chiến lược
+2. Sau đó, nó bắt đầu phản ứng khi thanh đã đang rơi (quá muộn!)
+3. Nó dần dần học cách thực hiện các di chuyển điều chỉnh sớm hơn và sớm hơn
+4. Cuối cùng, nó thực hiện các điều chỉnh tinh tế, chủ động, giữ cho thanh cân bằng hoàn hảo
+
+Sự tiến triển có thể nhìn thấy này là điều làm cho cartpole trở thành một ví dụ học tập thú vị. Bạn không chỉ thấy các con số cải thiện trong biểu đồ – bạn đang xem AI của mình phát triển một kỹ năng trước mắt bạn.
+
+## Kiểm tra sự hiểu biết của bạn
+
+<Quiz
+    title="Hiểu về học tăng cường với Cartpole"
+    questions={[
+        {
+            question: "Tại sao Cartpole được coi là một ví dụ học tăng cường lý tưởng?",
+            options: [
+                {
+                    text: "Nó đòi hỏi tài nguyên tính toán tối thiểu so với các vấn đề RL khác",
+                    correct: false,
+                    explanation: "Mặc dù Cartpole ít tốn tài nguyên hơn một số môi trường phức tạp, hướng dẫn nhấn mạnh những lý do khác nhau cho giá trị của nó như một ví dụ học tập. Hiệu quả tính toán không phải là lợi thế chính của nó."
+                },
+                {
+                    text: "Nó cung cấp phản hồi trực quan nơi bạn có thể theo dõi sự tiến bộ kỹ năng của tác tử trong thời gian thực",
+                    correct: true,
+                    explanation: "Chính xác! Hướng dẫn nhấn mạnh khía cạnh trực quan này như điều làm cho Cartpole thú vị: 'Bạn không chỉ thấy các con số cải thiện trong biểu đồ – bạn đang xem AI của mình phát triển một kỹ năng trước mắt bạn.' Vòng lặp phản hồi trực tiếp, trực quan này làm cho quá trình học tập trở nên hữu hình."
+                },
+                {
+                    text: "Đó là vấn đề học tăng cường duy nhất với giải pháp tối ưu được đảm bảo",
+                    correct: false,
+                    explanation: "Cartpole không có giải pháp tối ưu được đảm bảo độc đáo so với các vấn đề RL khác. Nhiều nhiệm vụ RL có giải pháp tối ưu hoặc gần tối ưu. Giá trị của Cartpole nằm ở nơi khác, đặc biệt là trong phản hồi trực quan trực quan của nó."
+                }
+            ],
+            hint: "Hãy nghĩ về điều gì làm cho Cartpole đặc biệt thỏa mãn như một ví dụ học tập theo hướng dẫn."
+        },
+        {
+            question: "Môi trường Cartpole sử dụng chiến lược phần thưởng nào để khuyến khích tác tử cân bằng thanh?",
+            options: [
+                {
+                    text: "Một phần thưởng tích cực lớn chỉ khi thanh giữ hoàn toàn thẳng đứng",
+                    correct: false,
+                    explanation: "Môi trường không đặc biệt thưởng cho sự thẳng đứng hoàn hảo. Việc tìm kiếm sự hoàn hảo tuyệt đối sẽ tạo ra một vấn đề phần thưởng thưa thớt, làm cho việc học tập khó khăn hơn nhiều."
+                },
+                {
+                    text: "Phần thưởng +1 cho mỗi bước thời gian thanh vẫn đứng, 0 khi nó rơi",
+                    correct: true,
+                    explanation: "Đúng! Mã cho thấy `CalculateReward()` trả về 1 khi tập tiếp tục và 0 khi nó kết thúc. Cách tiếp cận đơn giản này tạo ra một động lực mạnh mẽ: thanh giữ được thăng bằng càng lâu, tác tử nhận được tổng phần thưởng càng nhiều, tự nhiên khuyến khích nó thành thạo việc cân bằng."
+                },
+                {
+                    text: "Phần thưởng theo cấp độ dựa trên mức độ gần của thanh với vị trí thẳng đứng (phần thưởng cao hơn cho vị trí thẳng đứng hơn)",
+                    correct: false,
+                    explanation: "Mặc dù cách tiếp cận này có thể hoạt động, nhưng nó không phải là những gì triển khai của chúng ta sử dụng. Môi trường của chúng ta sử dụng phần thưởng nhị phân đơn giản hơn: +1 cho mỗi bước thời gian sống sót, bất kể góc chính xác, và 0 khi tập kết thúc."
+                }
+            ],
+            hint: "Kiểm tra phương thức `CalculateReward()` trong mã môi trường để xem chính xác phần thưởng nào được trao và khi nào."
+        },
+        {
+            question: "Mục đích của việc đặt các giá trị khác nhau cho maxStepsSoft và maxStepsHard là gì?",
+            options: [
+                {
+                    text: "Để tăng tốc độ học tập một cách nhân tạo bằng cách kết thúc các tập sớm",
+                    correct: false,
+                    explanation: "Đây không phải là về việc tăng tốc học tập một cách nhân tạo. Trên thực tế, các tập vẫn có thể chạy đến kết luận tự nhiên của chúng lên đến maxStepsHard. Sự phân biệt phục vụ một mục đích khác liên quan đến hiệu quả tính toán."
+                },
+                {
+                    text: "Để giảm sử dụng bộ nhớ GPU bằng cách giới hạn tính toán phần thưởng trong khi cho phép tiến trình môi trường tự nhiên",
+                    correct: true,
+                    explanation: "Đúng vậy! Như hướng dẫn giải thích, kỹ thuật này cho phép bạn 'kiểm soát chính xác mức độ nỗ lực tính toán để đầu tư trong khi vẫn duy trì động lực môi trường tự nhiên.' Bạn chỉ tích lũy phần thưởng và gradient cho đến maxStepsSoft, nhưng mô phỏng tiếp tục tự nhiên đến maxStepsHard, giảm đáng kể sử dụng bộ nhớ cho các tập dài."
+                },
+                {
+                    text: "Để tạo một chương trình giảng dạy nơi tác tử trước tiên học các tập ngắn trước khi giải quyết các tập dài hơn",
+                    correct: false,
+                    explanation: "Mặc dù học tập theo chương trình giảng dạy là một kỹ thuật RL hợp lệ, nhưng đó không phải là mục đích của giới hạn bước mềm/cứng. Các tham số này không tăng dần độ dài tập - chúng quản lý tài nguyên tính toán trong khi duy trì hành vi môi trường tự nhiên."
+                }
+            ],
+            hint: "Hãy xem xét điều gì xảy ra với bộ nhớ GPU khi các tập trở nên rất dài, và cấu hình tham số này giúp giải quyết vấn đề đó như thế nào."
+        },
+        {
+            question: "Cách giải thích tham số batchSize của PPO trong RLMatrix khác với các triển khai tiêu chuẩn như thế nào?",
+            options: [
+                {
+                    text: "Nó đề cập đến số lượng tập hoàn chỉnh cần thu thập trước khi cập nhật mô hình, không phải các bước riêng lẻ",
+                    correct: true,
+                    explanation: "Chính xác! Hướng dẫn chỉ ra rõ ràng sự khác biệt này: 'Trong RLMatrix, batchSize đề cập đến số lượng tập hoàn chỉnh cần thu thập trước khi cập nhật mô hình – không phải số lượng bước riêng lẻ như trong nhiều triển khai khác.' Đây là một điểm khác biệt quan trọng khi cấu hình quá trình huấn luyện của bạn."
+                },
+                {
+                    text: "Nó xác định kích thước của các lớp ẩn trong mạng nơ-ron",
+                    correct: false,
+                    explanation: "Kích thước batch không xác định kiến trúc mạng nơ-ron. Trong RLMatrix, tham số 'width' kiểm soát kích thước của các lớp ẩn. Kích thước batch thay vào đó liên quan đến việc thu thập bao nhiêu kinh nghiệm trước khi cập nhật học tập."
+                },
+                {
+                    text: "Nó kiểm soát bao nhiêu bước huấn luyện cần thực hiện trước khi đánh giá tác tử",
+                    correct: false,
+                    explanation: "Đây không phải là ý nghĩa của kích thước batch trong triển khai PPO của RLMatrix. Kích thước batch cụ thể liên quan đến việc thu thập dữ liệu cho học tập, không phải lịch trình đánh giá."
+                }
+            ],
+            hint: "Hướng dẫn có một phần cụ thể giải thích sự khác biệt trong triển khai PPO của RLMatrix - kiểm tra xem nó nói gì về giải thích kích thước batch."
+        },
+        {
+            question: "Bạn sẽ mong đợi thấy sự chuyển đổi nào trong hành vi của tác tử khi quá trình huấn luyện tiến triển?",
+            options: [
+                {
+                    text: "Tác tử sẽ phát triển các mẫu chuyển động ngày càng phức tạp trông có vẻ ngẫu nhiên nhưng duy trì cân bằng",
+                    correct: false,
+                    explanation: "Các tác tử thành công thường không phát triển các chuyển động trông có vẻ ngẫu nhiên. Sự tiến triển hướng tới kiểm soát tinh tế, có chủ ý hơn là các mẫu phức tạp hoặc hỗn loạn."
+                },
+                {
+                    text: "Tác tử sẽ tiến triển từ chuyển động ngẫu nhiên sang điều chỉnh phản ứng rồi đến điều chỉnh chủ động",
+                    correct: true,
+                    explanation: "Chính xác như mô tả trong hướng dẫn! Tác tử theo tiến trình này: chuyển động ngẫu nhiên → điều chỉnh phản ứng (khi thanh đã đang rơi) → can thiệp sớm hơn → điều chỉnh chủ động tinh tế. Điều này cho thấy cách nó học để dự đoán các vấn đề thay vì chỉ phản ứng với chúng."
+                },
+                {
+                    text: "Tác tử sẽ học cách giữ xe hoàn toàn ở giữa màn hình mọi lúc",
+                    correct: false,
+                    explanation: "Việc giữ xe ở giữa không nhất thiết là chiến lược tối ưu. Mục tiêu là giữ thanh cân bằng, có thể liên quan đến việc di chuyển xe một cách chiến lược. Việc giữ chính giữa hoàn hảo không được đề cập như một phần của tiến trình hành vi dự kiến."
+                }
+            ],
+            hint: "Hướng dẫn phác thảo một tiến trình hành vi cụ thể mà bạn sẽ quan sát khi tác tử học. Tìm danh sách đánh số mô tả sự chuyển đổi này."
+        }
+    ]}
+/>
+
+## Các bước tiếp theo
+
+Trong hướng dẫn này, bạn đã:
+- Thiết lập mô phỏng vật lý thời gian thực cho học tăng cường
+- Triển khai một tác tử hoàn chỉnh để làm chủ vấn đề kiểm soát cổ điển
+- Học cách quản lý bộ nhớ hiệu quả với kỹ thuật kết thúc mềm/cứng
+- Hiểu cách triển khai PPO của RLMatrix khác với các triển khai tiêu chuẩn
+
+Tiếp theo, chúng ta sẽ triển khai cùng môi trường mà không sử dụng bộ công cụ, cung cấp cho bạn cái nhìn sâu sắc về những gì đang xảy ra đằng sau những thuộc tính gọn gàng mà chúng ta đã sử dụng.
+
+<LinkCard
+    title="Cartpole không có Toolkit"
+    description="Xem những gì xảy ra bên dưới nắp capô bằng cách triển khai cartpole mà không có lớp trừu tượng toolkit."
+    href="/beginner/cartpolenotoolkit/"
+/>
