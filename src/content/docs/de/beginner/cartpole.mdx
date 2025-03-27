@@ -210,7 +210,7 @@ Die PPO-Implementierung in RLMatrix ist für verteiltes Training optimiert, was 
 
     1. **Interpretation der Batch-Größe**: In RLMatrix bezieht sich `batchSize` auf die Anzahl der vollständigen *Episoden*, die vor der Modellaktualisierung gesammelt werden – nicht auf die Anzahl der einzelnen Schritte wie in vielen anderen Implementierungen.
 
-    2. **On-Policy-Lernen**: PPO lernt nur aus den neuesten Erfahrungen mit der aktuellen Policy und verwirft sie dann. Deshalb ist es vorteilhaft, mehr Batches als Umgebungen zu haben – es gibt dem Algorithmus vielfältigere Daten zum Lernen.
+    2. **On-Policy-Konsistenz**: PPO lernt ausschließlich aus Erfahrungen, die mit der aktuellen Richtlinie gesammelt wurden. Das Sammeln mehrerer vollständiger Episoden vor der Aktualisierung hilft, stabile Gradientenschätzungen zu erstellen und mehr Umgebungsdynamik zu erfassen, ohne Off-Policy-Fehler einzuführen, die bei einer Aktualisierung der Richtlinie mitten in einer Episode auftreten würden.
 
     3. **Mehrfache Trainingsdurchläufe**: Der Parameter `ppoEpochs` steuert, wie viele Durchläufe wir durch die gesammelten Erfahrungen machen. Da wir die Daten danach verwerfen, wollen wir durch mehrfache Durchläufe maximalen Nutzen daraus ziehen.
 

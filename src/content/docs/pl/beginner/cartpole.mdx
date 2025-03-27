@@ -210,7 +210,7 @@ Implementacja PPO w RLMatrix jest zoptymalizowana pod kątem treningu rozproszon
 
     1. **Interpretacja rozmiaru wsadu (batch size)**: W RLMatrix `batchSize` odnosi się do liczby kompletnych *epizodów* zbieranych przed aktualizacją modelu – a nie do liczby pojedynczych kroków, jak w wielu innych implementacjach.
 
-    2. **Uczenie zgodne z polityką (on-policy)**: PPO uczy się tylko z najnowszych doświadczeń używając bieżącej polityki, a następnie je odrzuca. Dlatego posiadanie większej liczby wsadów niż środowisk jest korzystne – daje algorytmowi bardziej zróżnicowane dane do nauki.
+    2. **Spójność uczenia na bieżącej polityce (on-policy)**: PPO uczy się wyłącznie z doświadczeń zebranych przy użyciu aktualnej polityki. Zbieranie wielu kompletnych epizodów przed aktualizacją pomaga tworzyć stabilne oszacowania gradientu i uchwycić więcej dynamiki środowiska bez wprowadzania błędów off-policy, które pojawiłyby się przy aktualizowaniu polityki w trakcie epizodu.
 
     3. **Wielokrotne przejścia treningowe**: Parametr `ppoEpochs` kontroluje, ile przejść wykonujemy przez zebrane doświadczenia. Ponieważ później odrzucimy dane, chcemy wyciągnąć z nich maksymalną wartość poprzez wielokrotne przejścia.
 

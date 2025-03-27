@@ -1,0 +1,394 @@
+---
+title: カートポールの例
+description: 強化学習を使って動くカート上の棒のバランスを取る方法を学ぶ
+---
+
+import Quiz from '@/components/Quiz.astro';
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+強化学習を実際に見てみる準備はできましたか？このチュートリアルでは、AIが動くカート上で棒を直立させる方法を学習する様子を観察できる古典的なバランス課題に挑戦します。
+
+<video autoplay loop muted playsinline width="100%" style="cursor: pointer;" onclick="this.paused ? this.play() : this.pause();">
+    <source src="/images/cartpole/cartpole.mp4" type="video/mp4" />
+    <source src="/images/cartpole/cartpole.webm" type="video/webm" />
+    お使いのブラウザはHTML5ビデオをサポートしていません。
+</video>
+
+カートポールの課題は、シンプルさと視覚的なフィードバックを組み合わせており、強化学習に最適です。カートを左右に押すと、物理法則によって取り付けられた棒がバランスを保つか倒れるかが決まります。各タイムステップでエージェントは決断を下し、アルゴリズムが徐々にタスクをマスターしていく様子を観察する満足感を得られます。
+
+:::note[基本を超えて]
+<details>
+    <summary>この課題が特別な理由は？</summary>
+
+    カートポールが基準として残り続けているのは、単純過ぎず複雑過ぎない絶妙なバランスにあるからです：
+
+    - エージェントの成長をリアルタイムで観察できる
+    - 物理法則は直感的だが、制御のマスターは簡単ではない
+    - トレーニングが短時間で完了する（数時間ではなく数分）
+    - 成功は明確 - 棒が上に立っているか、そうでないか
+    - 技術はより複雑な制御問題に直接応用できる
+
+</details>
+:::
+
+## プロジェクトのセットアップ
+
+シミュレートされた物理環境を提供するために[SciSharp/Gym.NET](https://github.com/SciSharp/Gym.NET)を使用します。
+
+:::caution[Windowsが必要]
+この例はレンダリングにWindows Formsを使用しています。他のオペレーティングシステムを使用している場合、Gym.NETにはAvalonia対応のレンダラーもありますが、ここでは扱いません。代わりに、クロスプラットフォームで動作する予定のGodotベースの例をご確認ください。
+:::
+
+順を追って進めるか、お好みであれば[完全なプロジェクト](https://github.com/asieradzk/RLMatrixGettingStartedExample3_CartPole)をダウンロードしてください。
+
+必要なパッケージをインストールしましょう：
+
+```bash title="必要なパッケージのインストール"
+dotnet add package RLMatrix
+dotnet add package RLMatrix.Toolkit
+dotnet add package Gym.NET
+dotnet add package Gym.NET.Environments
+dotnet add package Gym.NET.Rendering.WinForm
+```
+
+## 環境の構築
+
+こちらがカートポール環境の実装です：
+
+```csharp title="CartPoleEnvironment.cs"
+using System;
+using System.Threading.Tasks;
+using Gym.Environments.Envs.Classic;
+using Gym.Rendering.WinForm;
+using RLMatrix.Toolkit;
+using NumSharp;
+
+namespace MyEnv
+{
+    [RLMatrixEnvironment]
+    public partial class CartPoleEnvironment
+    {
+        private CartPoleEnv myEnv;
+        private float[] myState;
+        private int stepCounter;
+        private const int MaxSteps = 100000;
+        private bool isDone;
+
+        public CartPoleEnvironment()
+        {
+            InitialiseAsync();
+        }
+
+        private void InitialiseAsync()
+        {
+            myEnv = new CartPoleEnv(WinFormEnvViewer.Factory);
+            ResetEnvironment();
+        }
+
+        [RLMatrixObservation]
+        public float GetCartPosition() => myState[0];
+
+        [RLMatrixObservation]
+        public float GetCartVelocity() => myState[1];
+
+        [RLMatrixObservation]
+        public float GetPoleAngle() => myState[2];
+
+        [RLMatrixObservation]
+        public float GetPoleAngularVelocity() => myState[3];
+
+        [RLMatrixActionDiscrete(2)]
+        public void ApplyForce(int action)
+        {
+            if (isDone)
+                ResetEnvironment();
+
+            var (observation, reward, done, _) = myEnv.Step(action);
+            myEnv.Render();
+            myState = ToFloatArray(observation);
+            isDone = done;
+            stepCounter++;
+
+            if (stepCounter > MaxSteps)
+                isDone = true;
+        }
+
+        private float[] ToFloatArray(NDArray npArray)
+        {
+            double[] doubleArray = npArray.ToArray<double>();
+            return Array.ConvertAll(doubleArray, item => (float)item);
+        }
+
+        [RLMatrixReward]
+        public float CalculateReward()
+        {
+            return isDone ? 0 : 1;
+        }
+
+        [RLMatrixDone]
+        public bool IsEpisodeFinished()
+        {
+            return isDone;
+        }
+
+        [RLMatrixReset]
+        public void ResetEnvironment()
+        {
+            myEnv.Reset();
+            myState = new float[4] { 0, 0, 0, 0 };
+            isDone = false;
+            stepCounter = 0;
+        }
+    }
+}
+```
+
+:::tip[ここで何が起きているか]
+私たちの環境はエージェントに4つの情報を提供しています：
+- カートの位置と速度
+- 棒の角度と角速度
+
+エージェントには2つの可能な行動があります：左に押す（0）か右に押す（1）。
+
+エージェントが押すたびに、物理シミュレーションを一歩進め、ウィンドウを再描画し、エピソードを続けるかどうかを決定します。棒が立ち続ける各タイムステップに対して+1の報酬を与え、より長くバランスを保つことを奨励します。
+
+タプルのアンパッキングパターン（`var (observation, reward, done, _) = myEnv.Step(action)`）はGym.NETのPythonの起源から継承されています。これは機能しますが、RLMatrixの設計哲学と完全に一致するわけではありません。
+:::
+
+## トレーニングのセットアップ
+
+エージェントにバランスを教えるトレーニングコードです：
+
+```csharp title="Program.cs"
+using RLMatrix.Agents.Common;
+using RLMatrix;
+using MyEnv;
+
+Console.WriteLine("Starting cart-pole training...\n");
+
+// 学習パラメータの設定
+var learningSetup = new PPOAgentOptions(
+    batchSize: 8,
+    ppoEpochs: 8,
+    memorySize: 1000,
+    gamma: 0.99f,
+    width: 128,
+    entropyCoefficient: 0.01f,
+    lr: 1E-02f
+);
+
+// 環境を作成してエージェントに接続
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+var env = new List<IEnvironmentAsync<float[]>> {
+    environment,
+    //new CartPoleEnvironment().RLInit() //複数環境でトレーニングする場合はコメントを外す
+};
+
+// エージェントの初期化
+var agent = new LocalDiscreteRolloutAgent<float[]>(learningSetup, env);
+
+// 収束するまでトレーニング
+for (int i = 0; i < 100000; i++)
+{
+    await agent.Step();
+}
+
+Console.WriteLine("\nTraining complete!");
+Console.ReadLine();
+```
+
+タイムステップごとに+1という単純な報酬は驚くほど強力です。深層強化学習アルゴリズムは自然と長期的な目標を最適化し、微妙な予防的調整がより長いバランス時間と高い累積報酬につながることを発見します。
+
+## RLMatrixにおけるPPO：何が違うのか
+
+:::caution[実装の違い]
+RLMatrixのPPO実装は分散トレーニング向けに最適化されており、研究論文や他のフレームワークで見られるものとは違いがあります：
+
+<details>
+    <summary>実装を比較する際に知っておくと良いこと</summary>
+
+    1. **バッチサイズの解釈**：RLMatrixでは、`batchSize`は個々のステップ数ではなく、モデル更新前に収集する完全な*エピソード*の数を指します。これは他の多くの実装とは異なります。
+
+    2. **オンポリシー一貫性**：PPOは現在のポリシーの下で収集された経験からのみ学習します。モデル更新前に複数の完全なエピソードを収集することで、安定した勾配推定を作成し、エピソード途中でポリシーを更新することで生じるオフポリシーエラーを導入せずに、より多くの環境ダイナミクスを捉えることができます。
+
+    3. **複数のトレーニングパス**：`ppoEpochs`パラメータは、収集された経験をどれだけ繰り返し処理するかを制御します。後でデータを破棄するため、複数回のパスを通じて最大限の価値を引き出したいのです。
+
+</details>
+:::
+
+初期のチュートリアルで見たDQNは単純なタスクにおいてサンプル効率が高い場合がありますが、PPOは一般的に広範なハイパーパラメータチューニングを必要とせず、より安定したトレーニングを提供します。これにより、特に難しい制御問題に適しています。
+
+## 知っておくべきメモリ節約のテクニック
+
+トレーニングコードのこの行に注目してください：
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 1200, maxStepsHard: 1200);
+```
+
+この一見何気ないパラメータ設定は、GPUメモリを圧迫することなく非常に長いエピソードでトレーニングするための鍵を握っています。説明しましょう：
+
+:::danger[長いエピソードのためのメモリブレイクスルー]
+ソフトとハードのエピソード制限の区別は、長いトレーニングエピソードを扱う方法を革新します：
+
+- **maxStepsHard**：環境のリセットを強制する前の絶対的な上限
+- **maxStepsSoft**：物理シミュレーションは継続しながら、報酬と勾配の計算を停止するタイミング
+
+このメカニズムは、エピソードが何千ステップも続く可能性がある場合に非常に価値があります。
+:::
+
+これらの値を変更するとどうなるでしょうか？
+
+```csharp
+var environment = new CartPoleEnvironment().RLInit(maxStepsSoft: 200, maxStepsHard: 1200);
+```
+
+ここで魔法が起こります：
+1. 最初の200ステップだけ報酬を集め、勾配を計算します
+2. シミュレーションは自然に1200ステップまで、または失敗するまで継続します
+3. GPUメモリ使用量が大幅に減少します
+
+この設定を実行するとき、報酬グラフを確認してみてください - カートポールの物理シミュレーションがそのポイントを超えて継続しているにもかかわらず、報酬が200（ソフト制限）を超えないことに気付くでしょう。タスクマネージャーを開いてリアルタイムでメモリ節約を観察してください。
+
+このテクニックは、エピソードが無限に続く可能性のある複雑な環境では不可欠です。メモリ不足エラーでクラッシュする代わりに、自然な環境ダイナミクスを維持しながら、どれだけの計算労力を投入するかを正確に制御できます。
+
+## 学習過程を観察する
+
+このトレーニングを実行すると、カートポール環境を表示するウィンドウが表示されます。最初は棒がすぐに倒れるでしょう - エージェントは何をすべきか全く分かっていません。しかし数分以内に、驚くべき変化を目撃することになります：
+
+1. 最初はエージェントは戦略なしにランダムな動きをします
+2. 次に棒が既に倒れているときに反応し始めます（遅すぎる！）
+3. 徐々に修正動作をより早く行うようになります
+4. 最終的には微妙な予防的調整を行い、棒を完璧にバランスさせます
+
+この目に見える進歩がカートポールを学習例として非常に満足のいくものにしています。グラフで数字が改善されるのを見るだけでなく、AIがあなたの目の前でスキルを発達させるのを観察しているのです。
+
+## 理解度をテストする
+
+<Quiz
+    title="カートポール強化学習の理解"
+    questions={[
+        {
+            question: "なぜカートポールは強化学習の理想的な例と考えられているのですか？",
+            options: [
+                {
+                    text: "他のRL問題と比較して最小限の計算リソースで済むから",
+                    correct: false,
+                    explanation: "カートポールは一部の複雑な環境よりもリソース集約的ではありませんが、チュートリアルは学習例としての価値について異なる理由を強調しています。計算効率はその主な利点ではありません。"
+                },
+                {
+                    text: "エージェントのスキル向上をリアルタイムで観察できる視覚的フィードバックを提供するから",
+                    correct: true,
+                    explanation: "その通りです！チュートリアルはこの視覚的側面をカートポールが満足のいく理由として強調しています：'グラフの数字が改善されるのを見るだけでなく、AIがあなたの目の前でスキルを発達させるのを観察しています。'この即時的で直感的なフィードバックループが学習プロセスを具体的なものにします。"
+                },
+                {
+                    text: "保証された最適解を持つ唯一の強化学習問題だから",
+                    correct: false,
+                    explanation: "カートポールは他のRL問題と比較して特別に保証された最適解を持っているわけではありません。多くのRLタスクは最適または準最適な解を持っています。カートポールの価値は別の場所にあり、特にその直感的な視覚的フィードバックにあります。"
+                }
+            ],
+            hint: "チュートリアルによると、カートポールが特に満足のいく学習例である理由は何かを考えてみてください。"
+        },
+        {
+            question: "カートポール環境はエージェントに棒のバランスを取らせるためにどのような報酬戦略を使用していますか？",
+            options: [
+                {
+                    text: "棒が完全に垂直を保っている場合のみ大きな正の報酬",
+                    correct: false,
+                    explanation: "環境は特に完璧な垂直性に報酬を与えているわけではありません。絶対的な完璧さを求めると疎な報酬問題が生じ、学習がはるかに難しくなります。"
+                },
+                {
+                    text: "棒が上に立っている各タイムステップに+1の報酬、倒れたときに0",
+                    correct: true,
+                    explanation: "正解です！コードは`CalculateReward()`がエピソードが続いている場合に1を、終了した場合に0を返すことを示しています。このシンプルなアプローチは強力なインセンティブを生み出します：棒がバランスを保っている時間が長いほど、エージェントが受け取る総報酬が多くなり、自然とバランスのマスターを促進します。"
+                },
+                {
+                    text: "棒が垂直にどれだけ近いかに基づく段階的な報酬（より垂直であるほど高い報酬）",
+                    correct: false,
+                    explanation: "このアプローチは機能する可能性がありますが、私たちの実装が使用しているものではありません。私たちの環境はよりシンプルな二進報酬を使用しています：正確な角度に関わらず各生存タイムステップに+1、エピソードが終了したときに0。"
+                }
+            ],
+            hint: "環境コードの`CalculateReward()`メソッドを確認して、どのような報酬がいつ与えられるかを正確に見てみましょう。"
+        },
+        {
+            question: "maxStepsSoftとmaxStepsHardに異なる値を設定する目的は何ですか？",
+            options: [
+                {
+                    text: "エピソードを早期に終了させることで学習速度を人為的に上げるため",
+                    correct: false,
+                    explanation: "これは学習を人為的に加速することが目的ではありません。実際、エピソードはmaxStepsHardまで自然な結論に達することができます。この区別は計算効率に関連する別の目的に役立ちます。"
+                },
+                {
+                    text: "自然な環境の進行を可能にしながら、報酬計算を制限することでGPUメモリ使用量を削減するため",
+                    correct: true,
+                    explanation: "その通りです！チュートリアルが説明するように、このテクニックにより「自然な環境ダイナミクスを維持しながら、どれだけの計算労力を投入するかを正確に制御できます」。maxStepsSoftまでのみ報酬と勾配を集め、シミュレーションはmaxStepsHardまで自然に継続され、長いエピソードのメモリ使用量が大幅に削減されます。"
+                },
+                {
+                    text: "エージェントがより長いエピソードに取り組む前に、まず短いエピソードを学習するカリキュラムを作成するため",
+                    correct: false,
+                    explanation: "カリキュラム学習は有効なRL技術ですが、それはソフト/ハードステップ制限の目的ではありません。これらのパラメータはエピソードの長さを徐々に増やすのではなく、自然な環境の挙動を維持しながら計算リソースを管理します。"
+                }
+            ],
+            hint: "エピソードが非常に長くなった場合にGPUメモリに何が起こるか、そしてこのパラメータ設定がその問題の解決にどのように役立つかを考えてみてください。"
+        },
+        {
+            question: "RLMatrixにおけるPPOのbatchSizeパラメータの解釈は標準的な実装とどのように異なりますか？",
+            options: [
+                {
+                    text: "個々のステップではなく、モデル更新前に収集する完全なエピソードの数を指す",
+                    correct: true,
+                    explanation: "その通りです！チュートリアルはこの違いを明確に指摘しています：「RLMatrixでは、batchSizeは個々のステップ数ではなく、モデル更新前に収集する完全なエピソードの数を指します。これは他の多くの実装とは異なります。」トレーニングを設定する際の重要な区別です。"
+                },
+                {
+                    text: "ニューラルネットワークの隠れ層のサイズを決定する",
+                    correct: false,
+                    explanation: "バッチサイズはニューラルネットワークのアーキテクチャを決定するものではありません。RLMatrixでは、'width'パラメータが隠れ層のサイズを制御します。バッチサイズは代わりに学習更新前に収集する経験の量に関連しています。"
+                },
+                {
+                    text: "エージェントを評価する前に実行するトレーニングステップの数を制御する",
+                    correct: false,
+                    explanation: "これはRLMatrixのPPO実装におけるバッチサイズの意味ではありません。バッチサイズは具体的に学習のためのデータ収集に関連しており、評価スケジュールではありません。"
+                }
+            ],
+            hint: "チュートリアルにはRLMatrixのPPO実装の違いを説明する特定のセクションがあります - バッチサイズの解釈について何と言っているか確認してください。"
+        },
+        {
+            question: "トレーニングが進むにつれて、エージェントの行動にどのような変化が期待できますか？",
+            options: [
+                {
+                    text: "エージェントはランダムに見えるがバランスを維持する、ますます複雑な動きのパターンを発達させる",
+                    correct: false,
+                    explanation: "成功したエージェントは通常、ランダムに見える動きを発達させません。進行は複雑または混沌としたパターンよりも、むしろ微妙で意図的な制御に向かう傾向があります。"
+                },
+                {
+                    text: "エージェントはランダムな動きから反応的な修正を経て予防的な調整へと進化する",
+                    correct: true,
+                    explanation: "チュートリアルで説明されている通りです！エージェントはこの進行をたどります：ランダムな動き → 反応的な修正（棒が既に落ちている時）→ より早い介入 → 微妙な予防的調整。これは単に反応するのではなく、問題を予測する方法を学んでいることを示しています。"
+                },
+                {
+                    text: "エージェントはカートを常に画面の中央に完璧に保つことを学習する",
+                    correct: false,
+                    explanation: "カートを中央に保つことが必ずしも最適な戦略ではありません。目標は棒のバランスを保つことであり、これには戦略的なカートの移動が必要かもしれません。完璧な中央配置は期待される行動進化の一部として言及されていません。"
+                }
+            ],
+            hint: "チュートリアルはエージェントが学習する際に観察できる特定の行動進化を概説しています。この変化を説明する番号付きリストを探してください。"
+        }
+    ]}
+/>
+
+## 次のステップ
+
+このチュートリアルでは：
+- 強化学習のためのリアルタイム物理シミュレーションをセットアップしました
+- 古典的な制御問題を習得するための完全なエージェントを実装しました
+- ソフト/ハード終了のテクニックでメモリを効率的に管理する方法を学びました
+- RLMatrixのPPO実装が標準と異なる点を理解しました
+
+次に、ツールキットを使用せずに同じ環境を実装して、これまで使用した整理されたアトリビュートの裏で何が起こっているかを理解します。
+
+<LinkCard
+    title="ツールキットなしのカートポール"
+    description="ツールキット抽象化なしでカートポールを実装することで、内部の動作を見てみましょう。"
+    href="/beginner/cartpolenotoolkit/"
+/>
