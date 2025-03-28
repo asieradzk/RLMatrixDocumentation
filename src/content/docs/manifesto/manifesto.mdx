@@ -191,6 +191,41 @@ Production systems deserve tools designed for reliability and performance, not a
 
 Break free from Python's grip. Join the RLMatrix revolution.
 
+:::danger[Addressing Python Absolutism]
+<details>
+    <summary>Click to expand responses to common Python arguments</summary>
+
+    **"But Python is easier! Just import a couple libraries and you're done!"**
+
+    Let's address this common refrain head-on. This simplistic view fundamentally misunderstands reinforcement learning development. DRL isn't like importing scikit-learn and calling `model.fit()`. It requires substantial custom code, environment design, reward engineering, and algorithm modification.
+
+    The "few lines of code" argument collapses entirely for production applications. You'll inevitably need to integrate with existing systems, handle edge cases, optimize performance bottlenecks, and debug complex interaction patterns. In these scenarios, Python's initial convenience transforms into technical debt.
+
+    Ironically, the library ecosystem argument favors C#, not Python, for many domains. Game engines, industrial control systems, and enterprise software predominantly expose C# APIs, not Python ones. That's why major engines like Unity and Godot offer C# as a first-class language. The entire .NET ecosystem provides rich libraries for everything from image processing to signal analysis—all with compile-time type safety.
+
+    **"But Python with NumPy/PyTorch is faster than C#!"**
+
+    This reveals a fundamental misunderstanding of reinforcement learning workloads. Yes, Python delegates heavy tensor operations to C++ libraries, but reinforcement learning involves substantial computation *outside* these optimized paths—precisely where Python's interpreter and GIL become crippling bottlenecks.
+
+    The inconvenient truth? In reinforcement learning, you cannot vectorize all operations. Trajectory sampling, environment interaction, experience replay management, and numerous other critical components happen in Python's slow execution environment. These bottlenecks can't be eliminated by mumbling "NumPy" like a magic incantation.
+
+    When confronted with this reality, Python defenders often retreat to: "Well, you could just write the slow parts in C++..." At that point, you're acknowledging Python is the problem! Why not use a language that's both productive *and* performant, rather than managing two codebases with complex interoperability?
+
+    RLMatrix's performance advantages aren't theoretical—they're measured and documented. The benchmarks don't lie. C# with TorchSharp delivers exceptional performance exactly where Python struggles most, while maintaining development velocity and code clarity.
+
+    **"But Python has a much larger ML community and more documentation!"**
+
+    This might be the purest example of cargo cult thinking in machine learning. It assumes that more documentation automatically means better solutions for your specific problem.
+
+    The reality? Most Python ML documentation focuses on supervised learning, not reinforcement learning. Quantity doesn't equal quality—much of what exists is contradictory, outdated, or covers only toy examples.
+
+    Understanding one well-designed, coherent C# codebase provides more value than piecing together solutions from dozens of inconsistent Python libraries. And if you truly need a specific algorithm, you can still interface with Python code when necessary.
+
+    Choosing Python solely because "that's what everyone uses" is the "nobody ever got fired for buying IBM" of machine learning—prioritizing crowd behavior over engineering efficiency.
+
+    The choice is clear: continue struggling with Python's inherent limitations in DRL, or embrace a platform designed for the production requirements you actually have.
+</details>
+:::
 ---
 
 *This manifesto was written by the creator of RLMatrix, advocating for a future where reinforcement learning is accessible, performant, and fully integrated with production software ecosystems.*
