@@ -53,6 +53,33 @@ export default defineConfig({
 			},
 			sidebar: [
 				{
+					label: 'Manifesto',
+					translations: {
+						'zh-CN': '宣言',
+						'zh-TW': '宣言',
+						'ja': 'マニフェスト',
+						'ko': '선언문',
+						'vi': 'Tuyên ngôn',
+						'pl': 'Manifest',
+						'de': 'Manifest',
+					},
+					items: [
+						{
+							label: 'RLMatrix Manifesto',
+							translations: {
+								'zh-CN': 'RLMatrix 宣言',
+								'zh-TW': 'RLMatrix 宣言',
+								'ja': 'RLMatrix マニフェスト',
+								'ko': 'RLMatrix 선언문',
+								'vi': 'Tuyên ngôn RLMatrix',
+								'pl': 'Manifest RLMatrix',
+								'de': 'RLMatrix Manifest',
+							},
+							slug: 'manifesto/manifesto'
+						}
+					]
+				},
+				{
 					label: 'Beginner\'s Handbook',
 					translations: {
 						'zh-CN': '新手手册',
