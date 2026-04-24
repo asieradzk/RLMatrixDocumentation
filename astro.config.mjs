@@ -80,6 +80,33 @@ export default defineConfig({
 					]
 				},
 				{
+					label: 'About',
+					translations: {
+						'zh-CN': '关于',
+						'zh-TW': '關於',
+						'ja': '概要',
+						'ko': '소개',
+						'vi': 'Giới thiệu',
+						'pl': 'O autorze',
+						'de': 'Über',
+					},
+					items: [
+						{
+							label: 'About the Author',
+							translations: {
+								'zh-CN': '关于作者',
+								'zh-TW': '關於作者',
+								'ja': '著者について',
+								'ko': '저자 소개',
+								'vi': 'Về tác giả',
+								'pl': 'O autorze',
+								'de': 'Über den Autor',
+							},
+							slug: 'about/about'
+						}
+					]
+				},
+				{
 					label: 'Beginner\'s Handbook',
 					translations: {
 						'zh-CN': '新手手册',

@@ -1,0 +1,58 @@
+---
+title: About
+description: About Adrian Sieradzki, creator of RLMatrix — contact, blog, and social links.
+---
+
+import { LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+<div style="display: flex; gap: 24px; align-items: center; flex-wrap: wrap; margin-bottom: 24px;">
+    <img
+        src="/images/about/adrian.jpg"
+        alt="Adrian Sieradzki"
+        width="160"
+        height="160"
+        style="border-radius: 50%; flex-shrink: 0;"
+    />
+    <div>
+        <h2 style="margin: 0 0 8px 0;">Adrian Sieradzki</h2>
+        <p style="margin: 0; opacity: 0.85;">
+            Creator of RLMatrix. Independent developer working on reinforcement learning,
+            engineering tooling, and the gap between research and production.
+        </p>
+    </div>
+</div>
+
+## Hello
+
+I built RLMatrix because I needed reinforcement learning that actually slotted into real engineering systems — not a research notebook. My background is in microfluidics (PhD in the [deMello group](https://www.demellogroup.ethz.ch/)), and the tools I needed didn't exist in the .NET world, so I wrote them. The [manifesto](/manifesto/manifesto/) is the longer version of why.
+
+If you're using RLMatrix, extending it, or hitting something that doesn't work the way you expected, reach out. I read everything.
+
+## Find me
+
+<CardGrid>
+    <LinkCard
+        title="Blog — sieradzki.io"
+        description="Long-form writing on RL, engineering, and whatever I'm currently obsessed with."
+        href="https://sieradzki.io/"
+    />
+    <LinkCard
+        title="GitHub — @asieradzk"
+        description="RLMatrix and other open-source work."
+        href="https://github.com/asieradzk"
+    />
+    <LinkCard
+        title="X / Twitter — @adisiera"
+        description="Shorter updates, threads, and RL-adjacent commentary."
+        href="https://x.com/adisiera"
+    />
+    <LinkCard
+        title="Email — adrian@sieradzki.io"
+        description="Direct contact for collaborations, consulting, or technical questions."
+        href="mailto:adrian@sieradzki.io"
+    />
+</CardGrid>
+
+## Working together
+
+RLMatrix is MIT-licensed and free to use in any project, commercial or otherwise. If you'd like help designing an RL system, integrating RLMatrix into a production stack, or sponsoring specific features or algorithms, email me at [adrian@sieradzki.io](mailto:adrian@sieradzki.io).
