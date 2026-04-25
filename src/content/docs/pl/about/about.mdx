@@ -1,0 +1,60 @@
+---
+title: O autorze
+description: O Adrianie Sieradzkim, twórcy RLMatrix — kontakt, blog i media społecznościowe.
+---
+
+import { LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+<div style="display: flex; gap: 24px; align-items: center; flex-wrap: wrap; margin-bottom: 24px;">
+    <img
+        src="/images/about/adrian.jpg"
+        alt="Adrian Sieradzki"
+        width="160"
+        height="160"
+        style="border-radius: 50%; flex-shrink: 0;"
+    />
+    <div>
+        <h2 style="margin: 0 0 8px 0;">Adrian Sieradzki</h2>
+        <p style="margin: 0; opacity: 0.85;">
+            Twórca RLMatrix. Niezależny programista pracujący nad uczeniem ze wzmocnieniem,
+            narzędziami inżynierskimi i tym, co dzieli badania od produkcji.
+        </p>
+    </div>
+</div>
+
+## Cześć
+
+RLMatrix powstał, bo potrzebowałem uczenia ze wzmocnieniem, które naprawdę da się wpiąć w realne systemy inżynierskie — a nie w notatnik badawczy. Jestem doktorantem na ETH Zurich w [grupie deMello](https://www.demellogroup.ethz.ch/), gdzie zajmuję się mikrofluidyką. Narzędzi, których potrzebowałem, w świecie .NET po prostu nie było, więc je napisałem. [Manifest](/pl/manifesto/manifesto/) to dłuższa wersja tej historii.
+
+Oprócz RLMatrix tworzę też [Kakuso](https://kaku.so/pl/) — słownik i narzędzie do nauki pisma japońskiego. Więcej o obu projektach i dłuższe teksty znajdziesz na [sieradzki.io](https://sieradzki.io/).
+
+Jeśli używasz RLMatrix, rozwijasz go albo trafiłeś na coś, co nie działa tak, jak powinno — odezwij się. Czytam wszystko.
+
+## Kontakt
+
+<CardGrid>
+    <LinkCard
+        title="Blog — sieradzki.io"
+        description="Dłuższe teksty o RL, inżynierii i tym, czym aktualnie się zajmuję."
+        href="https://sieradzki.io/"
+    />
+    <LinkCard
+        title="GitHub — @asieradzk"
+        description="RLMatrix i inne projekty open source."
+        href="https://github.com/asieradzk"
+    />
+    <LinkCard
+        title="X / Twitter — @adisiera"
+        description="Krótsze update'y, wątki i komentarze okołoRL-owe."
+        href="https://x.com/adisiera"
+    />
+    <LinkCard
+        title="E-mail — adrian@sieradzki.io"
+        description="Bezpośredni kontakt w sprawie współpracy, konsultacji lub pytań technicznych."
+        href="mailto:adrian@sieradzki.io"
+    />
+</CardGrid>
+
+## Współpraca
+
+RLMatrix jest wydany na licencji MIT — można go bez ograniczeń wykorzystywać w dowolnym projekcie, komercyjnym lub nie. Jeśli potrzebujesz pomocy przy projektowaniu systemu RL, integracji RLMatrix z produkcyjnym stackiem albo chcesz zasponsorować konkretne funkcje lub algorytmy, napisz na [adrian@sieradzki.io](mailto:adrian@sieradzki.io).

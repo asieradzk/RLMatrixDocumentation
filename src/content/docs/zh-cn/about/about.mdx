@@ -1,0 +1,59 @@
+---
+title: 关于
+description: 关于 RLMatrix 作者 Adrian Sieradzki — 联系方式、博客与社交链接。
+---
+
+import { LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+<div style="display: flex; gap: 24px; align-items: center; flex-wrap: wrap; margin-bottom: 24px;">
+    <img
+        src="/images/about/adrian.jpg"
+        alt="Adrian Sieradzki"
+        width="160"
+        height="160"
+        style="border-radius: 50%; flex-shrink: 0;"
+    />
+    <div>
+        <h2 style="margin: 0 0 8px 0;">Adrian Sieradzki</h2>
+        <p style="margin: 0; opacity: 0.85;">
+            RLMatrix 的作者。独立开发者，关注强化学习、工程工具，以及研究与生产之间的鸿沟。
+        </p>
+    </div>
+</div>
+
+## 你好
+
+我开发 RLMatrix，是因为我需要一个真正能嵌入实际工程系统的强化学习方案，而不是一个研究用的 notebook。我是苏黎世联邦理工学院（ETH Zurich）[deMello 课题组](https://www.demellogroup.ethz.ch/)的博士生，研究方向是微流控（microfluidics）。我需要的工具在 .NET 世界里并不存在，于是我自己动手写了它们。[宣言](/zh-cn/manifesto/manifesto/)里有更详细的解释。
+
+除了 RLMatrix，我还在开发 [Kakuso](https://kaku.so/) —— 一款日语词典和手写学习工具。两个项目的更多内容以及更长篇的文章可以在 [sieradzki.io](https://sieradzki.io/) 上找到。
+
+如果你正在使用 RLMatrix、扩展它、或者遇到了不符合预期的地方，欢迎联系我。每条消息我都会看。
+
+## 联系方式
+
+<CardGrid>
+    <LinkCard
+        title="博客 — sieradzki.io"
+        description="关于强化学习、工程实践，以及我正在着迷的话题的长篇文章。"
+        href="https://sieradzki.io/"
+    />
+    <LinkCard
+        title="GitHub — @asieradzk"
+        description="RLMatrix 及其他开源工作。"
+        href="https://github.com/asieradzk"
+    />
+    <LinkCard
+        title="X / Twitter — @adisiera"
+        description="较短的更新、推文串以及强化学习相关的评论。"
+        href="https://x.com/adisiera"
+    />
+    <LinkCard
+        title="邮件 — adrian@sieradzki.io"
+        description="合作、咨询或技术问题的直接联系方式。"
+        href="mailto:adrian@sieradzki.io"
+    />
+</CardGrid>
+
+## 合作
+
+RLMatrix 以 MIT 许可证发布，可在任何项目中自由使用，无论商用与否。如果你需要帮助设计 RL 系统、把 RLMatrix 集成到生产环境，或希望赞助特定功能或算法，请发邮件到 [adrian@sieradzki.io](mailto:adrian@sieradzki.io)。
